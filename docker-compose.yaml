@@ -1,4 +1,31 @@
 services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://my:mypass@postgres:5432/restore
+      UPLOAD_DIR: /app/uploads
+      WHISPER_DOWNLOAD_ROOT: /app/.cache/whisper
+    volumes:
+      - backend_uploads:/app/uploads
+      - whisper_cache:/app/.cache/whisper
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   postgres:
     image: postgres:18
     container_name: restore_postgres
@@ -11,5 +38,12 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U my -d restore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 volumes:
   postgres_data:
+  backend_uploads:
+  whisper_cache:
