@@ -108,7 +108,7 @@ def test_video_metadata_validation(monkeypatch, metadata, message):
 def test_speech_iterator_is_consumed_and_ordered(monkeypatch, wav_audio):
     consumed = []
     def transcribe(path, **kwargs):
-        assert kwargs['language'] is None
+        assert kwargs['language'] == 'en'
         assert kwargs['vad_filter'] is True
         def segments():
             consumed.append(1)
@@ -211,78 +211,53 @@ def test_empty_readable_transcript(segments):
     assert format_transcript(transcript) == 'silent.mp4\n\nNo speech was detected.\n'
 
 
-def test_multi_hour_audio_uses_bounded_windows_and_releases_them(monkeypatch):
-    import weakref
-    import numpy as np
-
-    duration = 2 * 3600 + 35 * 60 + 18
-    windows = []
-    previous = None
-    progress = []
-
-    class LongWav:
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        def getnchannels(self): return 1
-        def getsampwidth(self): return 2
-        def getframerate(self): return 16000
-        def getcomptype(self): return 'NONE'
-        def getnframes(self): return duration * 16000
-        def setpos(self, frame): self.position = frame
-        def readframes(self, frames):
-            assert frames <= 64 * 16000, 'Never read the whole multi-hour recording'
-            assert self.position + frames <= self.getnframes()
-            return b'\x00\x00' * frames
-
-    def transcribe(audio, **kwargs):
-        nonlocal previous
-        assert isinstance(audio, np.ndarray) and audio.dtype == np.float32
-        assert audio.size <= 64 * 16000
-        assert previous is None or previous() is None, 'Old windows must be released'
-        windows.append(audio.size)
-        previous = weakref.ref(audio)
-        return iter([]), SimpleNamespace(language='en')
-
-    monkeypatch.setattr(speech_recognizer.wave, 'open', lambda *args: LongWav())
-    monkeypatch.setattr(speech_recognizer, 'load_model', lambda *args: SimpleNamespace(transcribe=transcribe))
-    result = speech_recognizer.transcribe_audio(
-        Path('/virtual/multi-hour.wav'), download_root='/unused',
-        on_progress=lambda done, total: progress.append((done, total)),
-    )
-    assert result.segments == []
-    assert len(windows) == math.ceil(duration / 60)
-    assert progress[-1] == (duration * 1000, duration * 1000)
-    assert all(done <= total for done, total in progress)
-    assert [done for done, _ in progress] == sorted(done for done, _ in progress)
-
-
-def test_chunk_context_is_not_duplicated_and_timestamps_keep_original_offsets(monkeypatch, tmp_path):
-    path = tmp_path / 'boundary.wav'
+def test_full_file_is_transcribed_once_untouched_with_pinned_language(monkeypatch, tmp_path):
+    path = tmp_path / 'full.wav'
     with wave.open(str(path), 'wb') as audio:
         audio.setnchannels(1)
         audio.setsampwidth(2)
         audio.setframerate(16000)
-        audio.writeframes(b'\x00\x00' * 16000 * 5)
-    calls = []
+        audio.writeframes(b'\x00\x00' * 16000 * 130)
+    calls, progress = [], []
     def transcribe(audio, **kwargs):
-        calls.append(audio.size)
-        # Core windows: [0,2], [2,4], [4,5]. Read starts: 0, 1, 3 seconds.
-        rows = [
-            [(0.5, 1.0, 'First'), (1.9, 2.3, 'Boundary')],
-            [(0.9, 1.3, 'Boundary'), (2.0, 2.5, 'Middle'), (3.1, 3.6, 'Last')],
-            [(0.0, 0.5, 'Middle'), (1.1, 1.6, 'Last')],
-        ][len(calls) - 1]
-        return iter(SimpleNamespace(start=start, end=end, text=text) for start, end, text in rows), SimpleNamespace(language='en')
+        calls.append((audio, kwargs))
+        rows = [(0.5, 1.0, 'First'), (70.0, 71.0, 'After a minute'), (125.0, 129.0, 'Last')]
+        return iter(SimpleNamespace(start=s, end=e, text=t) for s, e, t in rows), SimpleNamespace(language='en')
     monkeypatch.setattr(speech_recognizer, 'load_model', lambda *args: SimpleNamespace(transcribe=transcribe))
-    result = speech_recognizer.transcribe_audio(path, chunk_seconds=2, download_root='/unused')
+    result = speech_recognizer.transcribe_audio(path, download_root='/unused',
+                                                on_progress=lambda done, total: progress.append((done, total)))
+    assert len(calls) == 1
+    audio, kwargs = calls[0]
+    assert audio == str(path)  # the file itself, never a sliced or converted buffer
+    assert kwargs['language'] == 'en'
+    assert kwargs['vad_filter'] is True
+    assert kwargs['condition_on_previous_text'] is False
     assert [(s.start_ms, s.end_ms, s.text) for s in result.segments] == [
-        (500, 1000, 'First'), (1900, 2300, 'Boundary'),
-        (3000, 3500, 'Middle'), (4100, 4600, 'Last'),
+        (500, 1000, 'First'), (70000, 71000, 'After a minute'), (125000, 129000, 'Last'),
     ]
-    assert calls == [3 * 16000, 4 * 16000, 2 * 16000]
+    assert all(s.speaker == 'Speaker' for s in result.segments)
+    assert progress[-1] == (130000, 130000)
+    assert [done for done, _ in progress] == sorted(done for done, _ in progress)
 
 
-def test_failed_chunk_does_not_report_completed_progress(monkeypatch, wav_audio):
+def test_speaker_assignment_never_changes_text_or_timestamps(tmp_path):
+    from app.processors.speaker_diarizer import assign_speakers
+    tones = [110, 400] * 6
+    path = tmp_path / 'voices.wav'
+    _voice_wav(path, tones)
+    original = speech_recognizer.TranscriptionResult('en', [
+        speech_recognizer.TranscriptSegment(i * 1000, (i + 1) * 1000, f'Words {i}') for i in range(len(tones))
+    ])
+    before = path.read_bytes()
+    labelled = assign_speakers(path, original)
+    assert path.read_bytes() == before
+    assert labelled.language == 'en'
+    assert [(s.start_ms, s.end_ms, s.text) for s in labelled.segments] == [
+        (s.start_ms, s.end_ms, s.text) for s in original.segments
+    ]
+
+
+def test_failed_transcription_does_not_report_completed_progress(monkeypatch, wav_audio):
     progress = []
     def transcribe(audio, **kwargs):
         def fail():
@@ -295,10 +270,9 @@ def test_failed_chunk_does_not_report_completed_progress(monkeypatch, wav_audio)
     assert progress == []
 
 
-@pytest.mark.parametrize('chunk,threads', [(0, 2), (121, 2), (60, 0)])
-def test_invalid_inference_resource_settings(monkeypatch, chunk, threads):
+@pytest.mark.parametrize('threads', [0, -1])
+def test_invalid_inference_resource_settings(monkeypatch, threads):
     from app.core.config import get_transcription_settings
-    monkeypatch.setenv('WHISPER_CHUNK_SECONDS', str(chunk))
     monkeypatch.setenv('WHISPER_CPU_THREADS', str(threads))
     with pytest.raises(ValueError):
         get_transcription_settings()
@@ -306,16 +280,21 @@ def test_invalid_inference_resource_settings(monkeypatch, chunk, threads):
 
 def test_default_inference_resource_settings(monkeypatch):
     from app.core.config import get_transcription_settings
-    monkeypatch.delenv('WHISPER_CHUNK_SECONDS', raising=False)
     monkeypatch.delenv('WHISPER_CPU_THREADS', raising=False)
+    monkeypatch.delenv('WHISPER_LANGUAGE', raising=False)
     settings = get_transcription_settings()
-    assert settings.chunk_seconds == 60
+    assert settings.language == 'en'
     assert settings.cpu_threads == 2
 
 
-def test_pcm_samples_are_normalized_without_losing_audio(monkeypatch, tmp_path):
+def test_auto_language_is_opt_in(monkeypatch):
+    from app.core.config import get_transcription_settings
+    monkeypatch.setenv('WHISPER_LANGUAGE', 'auto')
+    assert get_transcription_settings().language is None
+
+
+def test_wav_is_passed_through_byte_for_byte(monkeypatch, tmp_path):
     import struct
-    import numpy as np
 
     path = tmp_path / 'speech.wav'
     with wave.open(str(path), 'wb') as audio:
@@ -324,7 +303,8 @@ def test_pcm_samples_are_normalized_without_losing_audio(monkeypatch, tmp_path):
         audio.setframerate(16000)
         audio.writeframes(struct.pack('<4h', -32768, 32767, 0, 16384) * 4000)
     def transcribe(audio, **kwargs):
-        np.testing.assert_array_equal(audio[:4], np.array([-1, 32767 / 32768, 0, .5], dtype=np.float32))
+        assert audio == str(path)
+        assert path.read_bytes()[44:52] == struct.pack('<4h', -32768, 32767, 0, 16384)
         return iter([SimpleNamespace(start=0, end=1, text='Spoken content')]), SimpleNamespace(language='en')
     monkeypatch.setattr(speech_recognizer, 'load_model', lambda *args: SimpleNamespace(transcribe=transcribe))
     result = speech_recognizer.transcribe_audio(path, download_root='/unused')
@@ -343,3 +323,126 @@ def test_invalid_extracted_format_is_rejected_before_model_loading(monkeypatch, 
     monkeypatch.setattr(speech_recognizer, 'load_model', unexpected_load)
     with pytest.raises(speech_recognizer.SpeechRecognitionError, match='mono 16 kHz PCM WAV'):
         speech_recognizer.transcribe_audio(path, download_root='/unused')
+
+
+def _voice_wav(path, tones):
+    """Alternating one-second 'voices' made of different harmonic stacks."""
+    import numpy as np
+    t = np.arange(16000) / 16000
+    chunks = []
+    for base in tones:
+        wave_ = sum(np.sin(2 * np.pi * base * h * t) / h for h in range(1, 12))
+        chunks.append((wave_ / np.abs(wave_).max() * 12000).astype('<i2'))
+    with wave.open(str(path), 'wb') as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b''.join(chunk.tobytes() for chunk in chunks))
+
+
+def test_speaker_labels_fall_back_on_unreadable_audio(tmp_path):
+    from app.processors.speaker_diarizer import label_speakers
+    from app.processors.speech_recognizer import TranscriptSegment
+    segments = [TranscriptSegment(0, 1000, 'Hello')]
+    assert label_speakers(tmp_path / 'missing.wav', segments) == ['Speaker']
+
+
+def test_speaker_labels_fall_back_for_too_little_audio(wav_audio):
+    from app.processors.speaker_diarizer import label_speakers
+    from app.processors.speech_recognizer import TranscriptSegment
+    segments = [TranscriptSegment(0, 1000, 'Silence'), TranscriptSegment(1000, 2000, 'More silence')]
+    assert label_speakers(wav_audio, segments) == ['Speaker', 'Speaker']
+
+
+def test_speaker_labels_separate_different_voices(tmp_path):
+    from app.processors.speaker_diarizer import label_speakers
+    from app.processors.speech_recognizer import TranscriptSegment
+    tones = [110, 400] * 6
+    path = tmp_path / 'voices.wav'
+    _voice_wav(path, tones)
+    segments = [TranscriptSegment(i * 1000, (i + 1) * 1000, f'Segment {i}') for i in range(len(tones))]
+    labels = label_speakers(path, segments)
+    assert labels[0::2] == ['Speaker 1'] * 6
+    assert labels[1::2] == ['Speaker 2'] * 6
+
+
+def test_single_voice_stays_generic_speaker(tmp_path):
+    from app.processors.speaker_diarizer import label_speakers
+    from app.processors.speech_recognizer import TranscriptSegment
+    path = tmp_path / 'one_voice.wav'
+    _voice_wav(path, [220] * 12)
+    segments = [TranscriptSegment(i * 1000, (i + 1) * 1000, f'Segment {i}') for i in range(12)]
+    assert label_speakers(path, segments) == ['Speaker'] * 12
+
+
+def test_short_segments_are_padded_for_embedding_only(tmp_path):
+    from app.processors.speaker_diarizer import assign_speakers
+    from app.processors.speech_recognizer import TranscriptSegment, TranscriptionResult
+    tones = [110, 400] * 6
+    path = tmp_path / 'short.wav'
+    _voice_wav(path, tones)
+    # 300 ms segments centred in each one-second voice block.
+    original = TranscriptionResult('en', [
+        TranscriptSegment(i * 1000 + 350, i * 1000 + 650, f'Hi {i}') for i in range(len(tones))
+    ])
+    labelled = assign_speakers(path, original)
+    assert [(s.start_ms, s.end_ms, s.text) for s in labelled.segments] == [
+        (s.start_ms, s.end_ms, s.text) for s in original.segments
+    ]
+    assert all(s.speaker.startswith('Speaker') for s in labelled.segments)
+
+
+def test_stored_segments_without_speaker_default_to_speaker():
+    transcript = VideoTranscript(file_id=1, filename='old.mp4', duration_ms=1000, language='en', segments=[
+        {'id': 1, 'start_ms': 0, 'end_ms': 500, 'text': 'Old', 'speaker': None},
+        {'id': 2, 'start_ms': 500, 'end_ms': 900, 'text': 'Row'},
+    ])
+    assert [segment.speaker for segment in transcript.segments] == ['Speaker', 'Speaker']
+    assert transcript.paragraphs == [[1, 2]]
+
+
+def test_paragraphs_break_when_speaker_changes():
+    transcript = VideoTranscript(file_id=1, filename='talk.mp4', duration_ms=1000, language='en', segments=[
+        {'id': 1, 'start_ms': 0, 'end_ms': 500, 'text': 'Hi.', 'speaker': 'Speaker 1'},
+        {'id': 2, 'start_ms': 500, 'end_ms': 900, 'text': 'Hello.', 'speaker': 'Speaker 2'},
+    ])
+    assert transcript.paragraphs == [[1], [2]]
+
+
+def test_word_timestamps_split_co_presenter_handoff_within_segment():
+    words = [
+        SimpleNamespace(start=0.0, end=0.5, word=' Hello,'),
+        SimpleNamespace(start=0.5, end=2.0, word=" GraalVM's ahead-of-time compilation in production."),
+        SimpleNamespace(start=2.1, end=2.3, word=' It'),
+        SimpleNamespace(start=2.3, end=2.5, word=' will'),
+        SimpleNamespace(start=2.5, end=2.7, word=' be'),
+        SimpleNamespace(start=2.7, end=3.1, word=' presented'),
+        SimpleNamespace(start=3.1, end=3.3, word=' by'),
+        SimpleNamespace(start=3.3, end=3.6, word=' me,'),
+        SimpleNamespace(start=3.6, end=4.1, word=' Ahmadiyya'),
+        SimpleNamespace(start=4.1, end=4.7, word=' Zambratahani,'),
+        SimpleNamespace(start=4.8, end=5.0, word=' and'),
+        SimpleNamespace(start=5.0, end=5.3, word=' me,'),
+        SimpleNamespace(start=5.3, end=5.8, word=' Tommy'),
+        SimpleNamespace(start=5.8, end=6.3, word=' Watson.'),
+    ]
+    raw_segment = SimpleNamespace(start=0.0, end=6.3, text=' '.join(w.word.strip() for w in words), words=words)
+    parts = speech_recognizer._split_segment_words(raw_segment)
+    assert [(p.start_ms, p.end_ms, p.text) for p in parts] == [
+        (0, 2000, "Hello, GraalVM's ahead-of-time compilation in production."),
+        (2100, 4700, 'It will be presented by me, Ahmadiyya Zambratahani,'),
+        (4800, 6300, 'and me, Tommy Watson.'),
+    ]
+
+
+def test_speaker_labels_detect_second_speaker_in_short_intro_with_single_turn(tmp_path):
+    from app.processors.speaker_diarizer import label_speakers
+    from app.processors.speech_recognizer import TranscriptSegment
+    path = tmp_path / 'intro.wav'
+    _voice_wav(path, [110, 110, 320])
+    segments = [
+        TranscriptSegment(0, 1000, "Hello, and we can talk about GraalVM's ahead-of-time compilation."),
+        TranscriptSegment(1000, 2000, 'It will be presented by me, Ahmadiyya Zambratahani,'),
+        TranscriptSegment(2000, 3000, 'and me, Tommy Watson.'),
+    ]
+    assert label_speakers(path, segments) == ['Speaker 1', 'Speaker 1', 'Speaker 2']

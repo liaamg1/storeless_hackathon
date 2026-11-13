@@ -1,5 +1,6 @@
 """Video upload coordination and one-job processing pipeline."""
 import logging
+import os
 from tempfile import TemporaryDirectory
 from pathlib import Path
 from typing import BinaryIO
@@ -7,6 +8,7 @@ from uuid import uuid4
 
 from app.core.config import get_settings, get_transcription_settings
 from app.processors.audio_extractor import MediaProcessingError, MediaToolUnavailableError, extract_audio, validate_video
+from app.processors.speaker_diarizer import assign_speakers
 from app.processors.speech_recognizer import SpeechRecognitionError, transcribe_audio
 from app.repositories import transcription_repository as repository
 from app.schemas.transcription import VideoUploadResult
@@ -71,10 +73,19 @@ def process_video_job(job: repository.ClaimedVideoJob) -> None:
                 audio_path, model_name=settings.model_name, device=settings.device,
                 compute_type=settings.compute_type, language=settings.language,
                 download_root=settings.download_root,
-                chunk_seconds=settings.chunk_seconds, cpu_threads=settings.cpu_threads,
+                cpu_threads=settings.cpu_threads,
                 on_progress=report_progress,
             )
             logger.info("transcription_completed job_id=%s segment_count=%s", job.job_id, len(result.segments))
+            if os.getenv("SPEAKER_IDENTIFICATION", "true").strip().lower() not in {"0", "false", "no", "off"}:
+                try:  # optional enrichment: any failure keeps the generic "Speaker" label
+                    result = assign_speakers(audio_path, result,
+                                             int(os.getenv("SPEAKER_MAX_SPEAKERS", "6")))
+                    logger.info("speakers_identified job_id=%s speakers=%s", job.job_id,
+                                len({s.speaker for s in result.segments}))
+                except Exception as exc:
+                    logger.warning("speaker_identification_skipped job_id=%s error_type=%s",
+                                   job.job_id, type(exc).__name__)
             repository.update_job_step(job.job_id, 'saving_transcript')
             repository.complete_transcription(job, result)
             logger.info("transcript_saved job_id=%s file_id=%s", job.job_id, job.file_id)

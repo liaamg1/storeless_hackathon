@@ -18,7 +18,11 @@ services:
     environment:
       DATABASE_URL: postgresql://my:mypass@postgres:5432/restore
       UPLOAD_DIR: /app/uploads
+      MAX_VIDEO_UPLOAD_BYTES: 3000000000
       WHISPER_DOWNLOAD_ROOT: /app/.cache/whisper
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-en}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-4}
     volumes:
       - backend_uploads:/app/uploads
       - whisper_cache:/app/.cache/whisper

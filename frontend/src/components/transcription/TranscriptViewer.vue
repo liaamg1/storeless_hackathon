@@ -25,6 +25,15 @@ const paragraphs = computed(() => {
     }),
   );
 });
+// Name the speaker only when the voice changes. Paragraphs also break on pauses
+// and length, so consecutive paragraphs often belong to the same speaker.
+function speakerOf(index: number): string {
+  return paragraphs.value[index]?.[0]?.speaker || "Speaker";
+}
+function showSpeakerLabel(index: number): boolean {
+  if (!paragraphs.value[index]?.length) return false;
+  return index === 0 || speakerOf(index) !== speakerOf(index - 1);
+}
 const wordCount = computed(() =>
   props.transcript.segments.reduce(
     (count, segment) =>
@@ -81,6 +90,12 @@ watch(
     </p>
     <div v-else class="transcript-body">
       <p v-for="(paragraph, index) in paragraphs" :key="index">
+        <strong
+          v-if="showSpeakerLabel(index)"
+          class="speaker-label"
+          :data-speaker="paragraph[0].speaker"
+          >{{ paragraph[0].speaker || "Speaker" }}</strong
+        >
         <template
           v-for="(segment, segmentIndex) in paragraph"
           :key="segment.id"
@@ -157,6 +172,14 @@ h2 {
 }
 .transcript-body p {
   margin: 0 0 1.4em;
+}
+.speaker-label {
+  display: block;
+  margin-bottom: 2px;
+  color: #175ac6;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .selected {
   background: #fff1b8;

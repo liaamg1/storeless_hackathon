@@ -367,3 +367,58 @@ def test_readable_download_is_independent_of_original_mp4(client, database, fake
     result = client.get('/search', params={'q': 'Välkomna'}).json()['results'][0]
     assert result['file_id'] == created['file_id']
     assert result['segment_id'] in transcript['paragraphs'][0]
+
+
+def test_pipeline_persists_speaker_labels_without_changing_text(client, database, fake_video_tools, monkeypatch):
+    from dataclasses import replace
+    seen = {}
+    def label(audio_path, result, max_speakers):
+        seen['texts'] = [(s.start_ms, s.end_ms, s.text) for s in result.segments]
+        names = ['Speaker 1', 'Speaker 2']
+        return TranscriptionResult(result.language, [
+            replace(segment, speaker=names[i % 2]) for i, segment in enumerate(result.segments)
+        ])
+    monkeypatch.setattr(transcription_service, 'assign_speakers', label)
+    created = upload(client).json()
+    transcription_service.process_video_job(repository.claim_next_job())
+    transcript = client.get(f"/videos/{created['file_id']}/transcript").json()
+    assert [(s['start_ms'], s['end_ms'], s['text']) for s in transcript['segments']] == [
+        (500, 1500, 'First segment'), (2500, 4000, 'Second segment'),
+    ]
+    assert seen['texts'] == [(500, 1500, 'First segment'), (2500, 4000, 'Second segment')]
+    assert [s['speaker'] for s in transcript['segments']] == ['Speaker 1', 'Speaker 2']
+    # A speaker change starts a new paragraph.
+    assert transcript['paragraphs'] == [[s['id']] for s in transcript['segments']]
+
+
+def test_speaker_failure_never_fails_the_job(client, database, fake_video_tools, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError('diarizer exploded')
+    monkeypatch.setattr(transcription_service, 'assign_speakers', broken)
+    created = upload(client).json()
+    job = repository.claim_next_job()
+    transcription_service.process_video_job(job)
+    assert client.get(f'/jobs/{job.job_id}').json()['status'] == 'completed'
+    transcript = client.get(f"/videos/{created['file_id']}/transcript").json()
+    assert [s['text'] for s in transcript['segments']] == ['First segment', 'Second segment']
+    assert {s['speaker'] for s in transcript['segments']} == {'Speaker'}
+
+
+def test_speaker_identification_can_be_disabled(client, database, fake_video_tools, monkeypatch):
+    monkeypatch.setenv('SPEAKER_IDENTIFICATION', 'false')
+    def unexpected(*args, **kwargs):
+        raise AssertionError('Diarization must not run when disabled')
+    monkeypatch.setattr(transcription_service, 'assign_speakers', unexpected)
+    created = upload(client).json()
+    transcription_service.process_video_job(repository.claim_next_job())
+    transcript = client.get(f"/videos/{created['file_id']}/transcript").json()
+    assert {s['speaker'] for s in transcript['segments']} == {'Speaker'}
+
+
+def test_legacy_rows_without_speaker_read_as_speaker(client, database, fake_video_tools):
+    created = upload(client).json()
+    transcription_service.process_video_job(repository.claim_next_job())
+    with database() as connection:
+        connection.execute('UPDATE transcript_segments SET speaker = NULL WHERE file_id = %s', (created['file_id'],))
+    transcript = client.get(f"/videos/{created['file_id']}/transcript").json()
+    assert {s['speaker'] for s in transcript['segments']} == {'Speaker'}

@@ -1,14 +1,11 @@
-"""Local inference over bounded WAV windows, with timestamps in the original recording."""
+"""Local faster-whisper inference over the full extracted WAV, with typed millisecond segments."""
 import math
 import wave
-from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-import numpy as np
 
 if TYPE_CHECKING:
     from faster_whisper import WhisperModel
@@ -23,6 +20,7 @@ class TranscriptSegment:
     start_ms: int
     end_ms: int
     text: str
+    speaker: str = "Speaker"
 
 
 @dataclass(frozen=True)
@@ -50,69 +48,129 @@ def load_model(model_name: str, device: str, compute_type: str, download_root: s
         raise SpeechRecognitionError("Could not load the speech model. Check model settings and download access.") from exc
 
 
+_ABBREVIATIONS = {"mr.", "mrs.", "ms.", "dr.", "prof.", "sr.", "jr.", "vs.", "etc.", "e.g.", "i.e."}
+_TURN_PAIRS = {"and me", "and i", "and my", "i am", "my name", "thank you"}
+_TURN_STARTERS = {"i'm", "im", "hello", "hi", "hey"}
+
+
+def _clean_word(token: str) -> str:
+    return token.strip().lower().strip(",.!?;:—-\"'()")
+
+
+def _join_words(words: list[object]) -> str:
+    return "".join(
+        w.word if i == 0 or w.word.startswith(" ") else f" {w.word}"
+        for i, w in enumerate(words)
+    ).strip()
+
+
+def _split_segment_words(segment: object) -> list[TranscriptSegment]:
+    """Split a Whisper segment on pauses, sentences, or turn handoffs using word timestamps."""
+    start_ms = seconds_to_milliseconds(segment.start)
+    end_ms = seconds_to_milliseconds(segment.end)
+    if end_ms < start_ms:
+        raise ValueError("Speech segment ends before it starts.")
+    words = [w for w in (getattr(segment, "words", None) or []) if getattr(w, "word", "").strip()]
+    if not words:
+        text = segment.text.strip()
+        return [TranscriptSegment(start_ms, end_ms, text)] if text else []
+
+    results: list[TranscriptSegment] = []
+    current: list[object] = []
+    for index, word in enumerate(words):
+        w_start = seconds_to_milliseconds(word.start)
+        w_end = seconds_to_milliseconds(word.end)
+        if w_end < w_start:
+            raise ValueError("Speech word ends before it starts.")
+        if current:
+            prev = current[-1]
+            prev_text = prev.word.strip()
+            gap = max(0.0, word.start - prev.end)
+            duration = max(0.0, prev.end - current[0].start)
+            remaining = max(0.0, words[-1].end - word.start)
+            curr_clean = _clean_word(word.word)
+            next_clean = _clean_word(words[index + 1].word) if index + 1 < len(words) else ""
+            pair = f"{curr_clean} {next_clean}".strip()
+
+            sentence_end = (
+                prev_text.endswith((".", "!", "?", "。", "！", "？"))
+                and prev_text.lower() not in _ABBREVIATIONS
+                and len(prev_text) > 2
+                and duration >= 1.2
+                and remaining >= 1.0
+            )
+            pause_split = gap >= 0.80 and duration >= 1.50 and remaining >= 1.0
+            handoff_split = (
+                (pair in _TURN_PAIRS or curr_clean in _TURN_STARTERS)
+                and (
+                    (prev_text.endswith((",", ";", ":", "—", "-")) and len(current) >= 2)
+                    or (gap >= 0.12 and len(current) >= 3)
+                    or len(current) >= 5
+                )
+            )
+            if sentence_end or pause_split or handoff_split:
+                text = _join_words(current)
+                if text:
+                    results.append(TranscriptSegment(
+                        seconds_to_milliseconds(current[0].start),
+                        seconds_to_milliseconds(current[-1].end),
+                        text,
+                    ))
+                current = []
+        current.append(word)
+
+    if current:
+        text = _join_words(current)
+        if text:
+            results.append(TranscriptSegment(
+                seconds_to_milliseconds(current[0].start),
+                seconds_to_milliseconds(current[-1].end),
+                text,
+            ))
+    return results
+
+
 def transcribe_audio(
-    audio_path: Path, *, model_name: str = "tiny", device: str = "cpu",
-    compute_type: str = "int8", language: str | None = None, download_root: str,
-    chunk_seconds: int = 60, cpu_threads: int = 2,
+    audio_path: Path, *, model_name: str = "small", device: str = "cpu",
+    compute_type: str = "int8", language: str | None = "en", download_root: str,
+    cpu_threads: int = 2,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> TranscriptionResult:
-    """Keep audio, VAD and feature buffers bounded even for multi-hour recordings.
+    """Transcribe the whole extracted WAV in one call, so Whisper keeps full context.
 
-    Read the extracted mono 16 kHz PCM WAV directly rather than asking Whisper to
-    decode the entire file. Two seconds of surrounding audio help with words at a
-    boundary; midpoint ownership emits context segments in only one window.
-    Only the much smaller transcript text accumulates for atomic persistence.
+    The file is handed to faster-whisper untouched: no slicing, resampling or
+    array conversion happens here. Faster-whisper streams its own 30 s windows
+    internally. The language is pinned (default "en"; pass None to auto-detect),
+    condition_on_previous_text=False stops one bad window from feeding
+    hallucinated text into the next, and word_timestamps=True with conversational
+    VAD splits multi-speaker turns cleanly. Speaker labels are added afterwards by
+    a read-only pass that never changes text or timestamps.
     """
-    if not 1 <= chunk_seconds <= 120 or cpu_threads < 1:
-        raise ValueError("Chunk duration must be 1–120 seconds and CPU threads must be positive.")
+    if cpu_threads < 1:
+        raise ValueError("CPU threads must be positive.")
     try:
         with wave.open(str(audio_path), 'rb') as source:
             if (source.getnchannels(), source.getsampwidth(), source.getframerate(), source.getcomptype()) != (1, 2, 16000, 'NONE'):
                 raise SpeechRecognitionError("Extracted audio must be mono 16 kHz PCM WAV.")
-            sample_rate = source.getframerate()
-            total_frames = source.getnframes()
-            if total_frames <= 0:
+            if source.getnframes() <= 0:
                 raise SpeechRecognitionError("Extracted audio contains no samples.")
-            total_ms = round(total_frames * 1000 / sample_rate)
-            chunk_frames = chunk_seconds * sample_rate
-            context_frames = min(2 * sample_rate, chunk_frames // 2)
-            model = load_model(model_name, device, compute_type, download_root, cpu_threads)
-            segments: list[TranscriptSegment] = []
-            languages: Counter[str] = Counter()
-            detected_language = language or 'en'
-            for core_start in range(0, total_frames, chunk_frames):
-                core_end = min(core_start + chunk_frames, total_frames)
-                read_start = max(0, core_start - context_frames)
-                read_end = min(total_frames, core_end + context_frames)
-                source.setpos(read_start)
-                pcm = source.readframes(read_end - read_start)
-                if len(pcm) != (read_end - read_start) * 2:
-                    raise SpeechRecognitionError("Extracted audio is incomplete or truncated.")
-                audio = np.frombuffer(pcm, dtype='<i2').astype(np.float32)
-                audio /= 32768.0
-                # Passing an array bypasses Faster Whisper's full-file decoder.
-                raw_segments, info = model.transcribe(audio, language=language, vad_filter=True, beam_size=5)
-                detected_language = info.language
-                offset_ms = round(read_start * 1000 / sample_rate)
-                start_ms = round(core_start * 1000 / sample_rate)
-                end_ms = round(core_end * 1000 / sample_rate)
-                for segment in raw_segments:
-                    start = offset_ms + seconds_to_milliseconds(segment.start)
-                    end = offset_ms + seconds_to_milliseconds(segment.end)
-                    if end < start:
-                        raise ValueError("Speech segment ends before it starts.")
-                    text = segment.text.strip()
-                    if text and start_ms <= (start + end) / 2 < end_ms:
-                        segments.append(TranscriptSegment(max(0, start), min(total_ms, end), text))
-                        languages[info.language] += max(1, end - start)
-                # The exhausted generator must not keep an old window alive while
-                # the next window's feature/VAD buffers are allocated.
-                del raw_segments, audio, pcm
-                if on_progress is not None:
-                    on_progress(end_ms, total_ms)
-            segments.sort(key=lambda segment: (segment.start_ms, segment.end_ms))
-            result_language = language or (languages.most_common(1)[0][0] if languages else detected_language)
-            return TranscriptionResult(result_language, segments)
+            total_ms = round(source.getnframes() * 1000 / source.getframerate())
+        model = load_model(model_name, device, compute_type, download_root, cpu_threads)
+        raw_segments, info = model.transcribe(
+            str(audio_path), language=language, vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 300, "speech_pad_ms": 200},
+            beam_size=5, condition_on_previous_text=False, word_timestamps=True,
+        )
+        segments: list[TranscriptSegment] = []
+        for segment in raw_segments:
+            end_ms = seconds_to_milliseconds(segment.end)
+            segments.extend(_split_segment_words(segment))
+            if on_progress is not None:
+                on_progress(min(end_ms, total_ms), total_ms)
+        segments.sort(key=lambda segment: (segment.start_ms, segment.end_ms))
+        if on_progress is not None:
+            on_progress(total_ms, total_ms)
+        return TranscriptionResult(language or info.language, segments)
     except SpeechRecognitionError:
         raise
     except Exception as exc:

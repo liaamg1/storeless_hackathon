@@ -120,9 +120,10 @@ def complete_transcription(job: ClaimedVideoJob, result: TranscriptionResult) ->
                 raise ValueError("The transcription job is no longer processing.")
             with connection.cursor() as cursor:
                 cursor.executemany(
-                    """INSERT INTO transcript_segments (file_id, start_ms, end_ms, text)
-                       VALUES (%s, %s, %s, %s)""",
-                    [(job.file_id, segment.start_ms, segment.end_ms, segment.text) for segment in result.segments],
+                    """INSERT INTO transcript_segments (file_id, start_ms, end_ms, text, speaker)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    [(job.file_id, segment.start_ms, segment.end_ms, segment.text, segment.speaker)
+                     for segment in result.segments],
                 )
             connection.execute(
                 "UPDATE files SET transcript_language = %s WHERE id = %s", (result.language, job.file_id),
@@ -147,7 +148,7 @@ def get_transcript(file_id: int) -> VideoTranscript:
         if file["status"] != 'completed':
             raise TranscriptNotReadyError(file["status"], file["current_step"], file["error_message"])
         rows = connection.execute(
-            """SELECT id, start_ms, end_ms, text FROM transcript_segments
+            """SELECT id, start_ms, end_ms, text, speaker FROM transcript_segments
                WHERE file_id = %s ORDER BY start_ms, end_ms, id""", (file_id,),
         ).fetchall()
     return VideoTranscript(file_id=file_id, filename=file["filename"], duration_ms=file["duration_ms"],

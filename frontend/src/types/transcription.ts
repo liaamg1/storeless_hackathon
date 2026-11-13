@@ -34,6 +34,7 @@ export interface TranscriptSegment {
   start_ms: number;
   end_ms: number;
   text: string;
+  speaker: string;
 }
 
 export interface VideoTranscript {

@@ -2,28 +2,25 @@
 
 ## Long video transcription
 
-The worker reads the temporary mono 16 kHz WAV in short windows, rather than
-loading the full recording into memory. Audio, voice detection and model feature
-buffers are bounded by window duration; only transcript text accumulates. The
-original MP4 is streamed to disk on upload and is retained after processing.
+The worker extracts one clean mono 16 kHz WAV, then transcribes the whole file in a
+single faster-whisper call so the model keeps full context. The language is pinned
+to `en` by default (`WHISPER_LANGUAGE=auto` re-enables detection), VAD is on and
+`condition_on_previous_text` is off to avoid hallucination loops. Speaker labels
+are added afterwards by a read-only pass over the finished WAV; they never change
+the text. Faster-whisper decodes the file in memory, so multi-hour recordings need
+roughly 250 MB of RAM per hour of audio plus the model.
 
 Optional settings in `backend/.env` (defaults shown):
 
 ```dotenv
-WHISPER_CHUNK_SECONDS=60
+WHISPER_LANGUAGE=en
 WHISPER_CPU_THREADS=2
+SPEAKER_IDENTIFICATION=true
 ```
 
-Chunk duration must be 1–120 seconds. Windows include up to two seconds of context
-on either side, and transcript timestamps are shifted back to the original
-recording. The model is reused, with one inference worker and two CPU threads by
-default; FFmpeg decoding uses one thread. Larger or longer recordings take more
-time without requiring whole-recording audio/feature buffers in RAM.
-
-Completed windows produce `transcription_progress` log entries with the job ID,
-actual processed milliseconds, and total milliseconds. No transcript text is
-written to logs. A job is completed only after all windows have been transcribed
-and its transcript has been saved atomically.
+`transcription_progress` log entries report processed and total milliseconds as
+segments are produced. No transcript text is written to logs. A job is completed
+only after transcription and its atomic save.
 
 Apply backend changes or environment changes with:
 

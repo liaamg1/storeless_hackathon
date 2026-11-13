@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, computed_field, field_validator
 
 JobStatus = Literal["queued", "processing", "completed", "failed"]
 ProcessingStep = Literal["queued", "validating_video", "extracting_audio", "transcribing_audio", "saving_transcript", "completed"]
@@ -40,6 +40,13 @@ class StoredTranscriptSegment(BaseModel):
     start_ms: int
     end_ms: int
     text: str
+    speaker: str = "Speaker"
+
+    @field_validator("speaker", mode="before")
+    @classmethod
+    def default_speaker(cls, value: object) -> str:
+        """Transcripts saved before speaker identification have NULL speakers."""
+        return value.strip() if isinstance(value, str) and value.strip() else "Speaker"
 
 
 class VideoTranscript(BaseModel):
@@ -67,7 +74,8 @@ class VideoTranscript(BaseModel):
             if not text:
                 continue
             if current and previous is not None and (
-                segment.start_ms - previous.end_ms >= 2000
+                segment.speaker != previous.speaker
+                or segment.start_ms - previous.end_ms >= 2000
                 or (length >= 600 and previous.text.rstrip().endswith((".", "!", "?", "。", "！", "？")))
                 or length >= 1000
             ):
