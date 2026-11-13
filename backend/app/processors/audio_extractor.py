@@ -63,7 +63,7 @@ def extract_audio(video_path: Path, output_path: Path, ffmpeg: str = "ffmpeg", t
     """
     run_media_command([
         ffmpeg, "-nostdin", "-v", "error", "-y", "-protocol_whitelist", "file,pipe",
-        "-i", str(video_path), "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000",
+        "-threads", "1", "-i", str(video_path), "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000",
         "-c:a", "pcm_s16le", str(output_path),
     ], timeout)
     if not output_path.is_file() or output_path.stat().st_size <= 44:

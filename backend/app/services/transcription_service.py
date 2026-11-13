@@ -63,10 +63,16 @@ def process_video_job(job: repository.ClaimedVideoJob) -> None:
             logger.info("audio_extraction_completed job_id=%s", job.job_id)
             repository.update_job_step(job.job_id, 'transcribing_audio')
             logger.info("transcription_started job_id=%s", job.job_id)
+            def report_progress(processed_ms: int, total_ms: int) -> None:
+                logger.info("transcription_progress job_id=%s processed_ms=%s total_ms=%s",
+                            job.job_id, processed_ms, total_ms)
+
             result = transcribe_audio(
                 audio_path, model_name=settings.model_name, device=settings.device,
                 compute_type=settings.compute_type, language=settings.language,
                 download_root=settings.download_root,
+                chunk_seconds=settings.chunk_seconds, cpu_threads=settings.cpu_threads,
+                on_progress=report_progress,
             )
             logger.info("transcription_completed job_id=%s segment_count=%s", job.job_id, len(result.segments))
             repository.update_job_step(job.job_id, 'saving_transcript')

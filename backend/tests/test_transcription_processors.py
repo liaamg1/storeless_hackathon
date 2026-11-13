@@ -29,6 +29,17 @@ def test_installed_speech_decoder_can_read_extracted_wav(tmp_path):
     assert not decoded.any()
 
 
+@pytest.fixture
+def wav_audio(tmp_path):
+    path = tmp_path / 'audio.wav'
+    with wave.open(str(path), 'wb') as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b'\x00\x00' * 16000 * 5)
+    return path
+
+
 @pytest.mark.parametrize('seconds,expected', [(0, 0), (1.234, 1234), (60.5, 60500)])
 def test_millisecond_conversion(seconds, expected):
     assert speech_recognizer.seconds_to_milliseconds(seconds) == expected
@@ -61,7 +72,7 @@ def test_audio_extraction_command(tmp_path, monkeypatch):
     assert audio_extractor.extract_audio(source, target, 'ffmpeg-custom', 30) == target
     arguments, options = calls[0]
     assert arguments == ['ffmpeg-custom', '-nostdin', '-v', 'error', '-y', '-protocol_whitelist', 'file,pipe',
-                         '-i', str(source), '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000',
+                         '-threads', '1', '-i', str(source), '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000',
                          '-c:a', 'pcm_s16le', str(target)]
     assert 'shell' not in options
     assert options['timeout'] == 30
@@ -94,7 +105,7 @@ def test_video_metadata_validation(monkeypatch, metadata, message):
         audio_extractor.validate_video(Path('/tmp/recording.mp4'))
 
 
-def test_speech_iterator_is_consumed_and_ordered(monkeypatch):
+def test_speech_iterator_is_consumed_and_ordered(monkeypatch, wav_audio):
     consumed = []
     def transcribe(path, **kwargs):
         assert kwargs['language'] is None
@@ -107,7 +118,7 @@ def test_speech_iterator_is_consumed_and_ordered(monkeypatch):
             yield SimpleNamespace(start=1.1, end=1.2, text=' ')
         return segments(), SimpleNamespace(language='en')
     monkeypatch.setattr(speech_recognizer, 'load_model', lambda *args: SimpleNamespace(transcribe=transcribe))
-    result = speech_recognizer.transcribe_audio(Path('/tmp/audio.wav'), download_root='/tmp/models')
+    result = speech_recognizer.transcribe_audio(wav_audio, download_root='/tmp/models')
     assert consumed == [1, 2]
     assert result.language == 'en'
     assert [(segment.start_ms, segment.end_ms, segment.text) for segment in result.segments] == [
@@ -115,15 +126,15 @@ def test_speech_iterator_is_consumed_and_ordered(monkeypatch):
     ]
 
 
-def test_no_speech_and_explicit_language(monkeypatch):
+def test_no_speech_and_explicit_language(monkeypatch, wav_audio):
     def transcribe(path, **kwargs):
         assert kwargs['language'] == 'sv'
         return iter([]), SimpleNamespace(language='sv')
     monkeypatch.setattr(speech_recognizer, 'load_model', lambda *args: SimpleNamespace(transcribe=transcribe))
-    assert speech_recognizer.transcribe_audio(Path('/tmp/audio.wav'), language='sv', download_root='/tmp/models').segments == []
+    assert speech_recognizer.transcribe_audio(wav_audio, language='sv', download_root='/tmp/models').segments == []
 
 
-def test_iterator_failure_is_not_completed(monkeypatch):
+def test_iterator_failure_is_not_completed(monkeypatch, wav_audio):
     def transcribe(*args, **kwargs):
         def segments():
             yield SimpleNamespace(start=0, end=1, text='Partial')
@@ -131,7 +142,7 @@ def test_iterator_failure_is_not_completed(monkeypatch):
         return segments(), SimpleNamespace(language='en')
     monkeypatch.setattr(speech_recognizer, 'load_model', lambda *args: SimpleNamespace(transcribe=transcribe))
     with pytest.raises(speech_recognizer.SpeechRecognitionError) as error:
-        speech_recognizer.transcribe_audio(Path('/tmp/audio.wav'), download_root='/tmp/models')
+        speech_recognizer.transcribe_audio(wav_audio, download_root='/tmp/models')
     assert 'private transcript details' not in str(error.value)
 
 
@@ -147,6 +158,8 @@ def test_model_is_reused_and_loading_failure_is_safe(monkeypatch):
     assert first is speech_recognizer.load_model('tiny', 'cpu', 'int8', '/tmp/cache')
     assert len(calls) == 1
     assert calls[0][1]['device'] == 'cpu'
+    assert calls[0][1]['cpu_threads'] == 2
+    assert calls[0][1]['num_workers'] == 1
     speech_recognizer.load_model.cache_clear()
     def fail(*args, **kwargs):
         raise RuntimeError('private details')
@@ -196,3 +209,137 @@ def test_empty_readable_transcript(segments):
     transcript = VideoTranscript(file_id=1, filename='silent.mp4', duration_ms=1000, language=None, segments=segments)
     assert transcript.paragraphs == []
     assert format_transcript(transcript) == 'silent.mp4\n\nNo speech was detected.\n'
+
+
+def test_multi_hour_audio_uses_bounded_windows_and_releases_them(monkeypatch):
+    import weakref
+    import numpy as np
+
+    duration = 2 * 3600 + 35 * 60 + 18
+    windows = []
+    previous = None
+    progress = []
+
+    class LongWav:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def getnchannels(self): return 1
+        def getsampwidth(self): return 2
+        def getframerate(self): return 16000
+        def getcomptype(self): return 'NONE'
+        def getnframes(self): return duration * 16000
+        def setpos(self, frame): self.position = frame
+        def readframes(self, frames):
+            assert frames <= 64 * 16000, 'Never read the whole multi-hour recording'
+            assert self.position + frames <= self.getnframes()
+            return b'\x00\x00' * frames
+
+    def transcribe(audio, **kwargs):
+        nonlocal previous
+        assert isinstance(audio, np.ndarray) and audio.dtype == np.float32
+        assert audio.size <= 64 * 16000
+        assert previous is None or previous() is None, 'Old windows must be released'
+        windows.append(audio.size)
+        previous = weakref.ref(audio)
+        return iter([]), SimpleNamespace(language='en')
+
+    monkeypatch.setattr(speech_recognizer.wave, 'open', lambda *args: LongWav())
+    monkeypatch.setattr(speech_recognizer, 'load_model', lambda *args: SimpleNamespace(transcribe=transcribe))
+    result = speech_recognizer.transcribe_audio(
+        Path('/virtual/multi-hour.wav'), download_root='/unused',
+        on_progress=lambda done, total: progress.append((done, total)),
+    )
+    assert result.segments == []
+    assert len(windows) == math.ceil(duration / 60)
+    assert progress[-1] == (duration * 1000, duration * 1000)
+    assert all(done <= total for done, total in progress)
+    assert [done for done, _ in progress] == sorted(done for done, _ in progress)
+
+
+def test_chunk_context_is_not_duplicated_and_timestamps_keep_original_offsets(monkeypatch, tmp_path):
+    path = tmp_path / 'boundary.wav'
+    with wave.open(str(path), 'wb') as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b'\x00\x00' * 16000 * 5)
+    calls = []
+    def transcribe(audio, **kwargs):
+        calls.append(audio.size)
+        # Core windows: [0,2], [2,4], [4,5]. Read starts: 0, 1, 3 seconds.
+        rows = [
+            [(0.5, 1.0, 'First'), (1.9, 2.3, 'Boundary')],
+            [(0.9, 1.3, 'Boundary'), (2.0, 2.5, 'Middle'), (3.1, 3.6, 'Last')],
+            [(0.0, 0.5, 'Middle'), (1.1, 1.6, 'Last')],
+        ][len(calls) - 1]
+        return iter(SimpleNamespace(start=start, end=end, text=text) for start, end, text in rows), SimpleNamespace(language='en')
+    monkeypatch.setattr(speech_recognizer, 'load_model', lambda *args: SimpleNamespace(transcribe=transcribe))
+    result = speech_recognizer.transcribe_audio(path, chunk_seconds=2, download_root='/unused')
+    assert [(s.start_ms, s.end_ms, s.text) for s in result.segments] == [
+        (500, 1000, 'First'), (1900, 2300, 'Boundary'),
+        (3000, 3500, 'Middle'), (4100, 4600, 'Last'),
+    ]
+    assert calls == [3 * 16000, 4 * 16000, 2 * 16000]
+
+
+def test_failed_chunk_does_not_report_completed_progress(monkeypatch, wav_audio):
+    progress = []
+    def transcribe(audio, **kwargs):
+        def fail():
+            raise RuntimeError('private data')
+            yield
+        return fail(), SimpleNamespace(language='en')
+    monkeypatch.setattr(speech_recognizer, 'load_model', lambda *args: SimpleNamespace(transcribe=transcribe))
+    with pytest.raises(speech_recognizer.SpeechRecognitionError):
+        speech_recognizer.transcribe_audio(wav_audio, download_root='/unused', on_progress=lambda *args: progress.append(args))
+    assert progress == []
+
+
+@pytest.mark.parametrize('chunk,threads', [(0, 2), (121, 2), (60, 0)])
+def test_invalid_inference_resource_settings(monkeypatch, chunk, threads):
+    from app.core.config import get_transcription_settings
+    monkeypatch.setenv('WHISPER_CHUNK_SECONDS', str(chunk))
+    monkeypatch.setenv('WHISPER_CPU_THREADS', str(threads))
+    with pytest.raises(ValueError):
+        get_transcription_settings()
+
+
+def test_default_inference_resource_settings(monkeypatch):
+    from app.core.config import get_transcription_settings
+    monkeypatch.delenv('WHISPER_CHUNK_SECONDS', raising=False)
+    monkeypatch.delenv('WHISPER_CPU_THREADS', raising=False)
+    settings = get_transcription_settings()
+    assert settings.chunk_seconds == 60
+    assert settings.cpu_threads == 2
+
+
+def test_pcm_samples_are_normalized_without_losing_audio(monkeypatch, tmp_path):
+    import struct
+    import numpy as np
+
+    path = tmp_path / 'speech.wav'
+    with wave.open(str(path), 'wb') as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(struct.pack('<4h', -32768, 32767, 0, 16384) * 4000)
+    def transcribe(audio, **kwargs):
+        np.testing.assert_array_equal(audio[:4], np.array([-1, 32767 / 32768, 0, .5], dtype=np.float32))
+        return iter([SimpleNamespace(start=0, end=1, text='Spoken content')]), SimpleNamespace(language='en')
+    monkeypatch.setattr(speech_recognizer, 'load_model', lambda *args: SimpleNamespace(transcribe=transcribe))
+    result = speech_recognizer.transcribe_audio(path, download_root='/unused')
+    assert result.segments[0].text == 'Spoken content'
+
+
+def test_invalid_extracted_format_is_rejected_before_model_loading(monkeypatch, tmp_path):
+    path = tmp_path / 'stereo.wav'
+    with wave.open(str(path), 'wb') as audio:
+        audio.setnchannels(2)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b'\x00' * 64000)
+    def unexpected_load(*args):
+        raise AssertionError('Must validate extracted format before loading a model')
+    monkeypatch.setattr(speech_recognizer, 'load_model', unexpected_load)
+    with pytest.raises(speech_recognizer.SpeechRecognitionError, match='mono 16 kHz PCM WAV'):
+        speech_recognizer.transcribe_audio(path, download_root='/unused')
