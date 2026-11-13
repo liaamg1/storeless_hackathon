@@ -23,7 +23,8 @@ const sort = defineModel<FileSort>("sort", { required: true });
       >
         <option value="all">All file types</option>
         <option value="pdf">PDF documents</option>
-        <option value="video">MP4 recordings</option></select
+        <option value="video">MP4 recordings</option>
+        <option value="pptx">PPTX presentations</option></select
       ><select v-model="status" aria-label="Filter by status">
         <option value="all">All statuses</option>
         <option value="available">Available</option>

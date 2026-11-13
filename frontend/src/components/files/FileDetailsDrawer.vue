@@ -62,6 +62,10 @@ function openProcessing(): void {
   });
   emit("close");
 }
+function openSlides(): void {
+  void router.push({ name: "slides", query: { file: String(props.file.id) } });
+  emit("close");
+}
 function openStorage(): void {
   void router.push({ name: "storage", query: { file: String(props.file.id) } });
   emit("close");
@@ -102,7 +106,9 @@ function openStorage(): void {
             ? "MP4 recording"
             : file.type === "pdf"
               ? "PDF document"
-              : "File"
+              : file.type === "pptx"
+                ? "PPTX presentation"
+                : "File"
         }}
       </dd>
       <dt>Size</dt>
@@ -146,10 +152,16 @@ function openStorage(): void {
             :is="file.type === 'video' ? Video : FileText"
             :size="16"
           />{{
-            file.type === "video" ? "View transcript" : "View extracted text"
+            file.type === "video"
+              ? "View transcript"
+              : file.type === "pptx"
+                ? "View slides"
+                : "View extracted text"
           }}<ArrowUpRight :size="15" /></button
         ><button v-if="file.type === 'video'" @click="openProcessing">
           <Activity :size="16" />View processing status</button
+        ><button v-if="file.type === 'pdf'" @click="openSlides">
+          <FileText :size="16" />Compare slides</button
         ><button @click="openStorage">
           <ChartNoAxesColumn :size="16" />View storage comparison
         </button>

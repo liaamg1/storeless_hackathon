@@ -2022,3 +2022,123 @@ pre {
 .storage-savings:not(.comparison-ready) .output-breakdown {
   grid-column: 1/-1;
 }
+/* Presentation comparison uses cached thumbnails, never decorative match data. */
+.slide-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 18px;
+}
+.slide-card h3 {
+  margin: 0;
+}
+.slide-classification {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #f1f4f8;
+  color: #53677f;
+}
+.slide-classification.exact {
+  color: #237347;
+  background: #ecf7f0;
+}
+.slide-classification.similar {
+  color: #986218;
+  background: #fff6e8;
+}
+.slide-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.slide-pair.single-slide {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 550px;
+}
+.slide-pair figure {
+  margin: 0;
+  min-width: 0;
+}
+.slide-pair img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4/3;
+  object-fit: contain;
+  background: #f5f7fa;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.slide-pair figcaption {
+  margin: 10px 0;
+  font-size: 12px;
+}
+.slide-pair figcaption strong {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slide-pair figcaption span {
+  display: block;
+  color: #66768c;
+  font-size: 11px;
+  margin-top: 3px;
+}
+.slide-match-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+.slide-match-picker select {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+.slide-match-picker label {
+  margin: 0;
+  font-size: 12px;
+}
+.slide-score {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #66768c;
+}
+.slide-score strong {
+  color: #18283d;
+  margin-right: 7px;
+  font-size: 17px;
+}
+.slide-text {
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  padding-top: 12px;
+}
+.slide-text summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #53677f;
+}
+.slide-text pre {
+  font-size: 13px;
+}
+.file-type-icon.pptx {
+  color: #a96727;
+  background: #fff6ec;
+  border-color: #f2e3d2;
+}
+@media (max-width: 650px) {
+  .slide-pair {
+    grid-template-columns: 1fr;
+  }
+  .slide-card {
+    padding: 16px;
+  }
+  .slide-classification {
+    font-size: 10px;
+  }
+}

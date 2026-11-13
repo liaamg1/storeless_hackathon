@@ -7,6 +7,8 @@ from threading import Event
 from app.core.database import get_connection
 from app.repositories.transcription_repository import claim_next_job, fail_interrupted_jobs
 from app.services.transcription_service import process_video_job
+from app.repositories.presentation_repository import claim_presentation_job
+from app.services.presentation_service import process_presentation_job
 
 logger = logging.getLogger(__name__)
 WORKER_LOCK_ID = 72815041
@@ -47,8 +49,12 @@ def run_worker(once: bool = False, wait_for_lock: bool = False) -> None:
                 job = claim_next_job()
                 if job:
                     process_video_job(job)
-                elif not once:
-                    stopping.wait(2)
+                else:
+                    presentation_job = claim_presentation_job()
+                    if presentation_job:
+                        process_presentation_job(presentation_job)
+                    elif not once:
+                        stopping.wait(2)
                 if once:
                     return
             except Exception as exc:

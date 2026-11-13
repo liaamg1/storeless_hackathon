@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { FileText, Video, File, ArrowUpRight, Ellipsis } from "@lucide/vue";
+import {
+  FileText,
+  Video,
+  File,
+  Presentation,
+  ArrowUpRight,
+  Ellipsis,
+} from "@lucide/vue";
 import type { WorkspaceFile } from "../../utils/files";
 import { formatDate } from "../../utils/files";
 import { formatBytes } from "../../utils/formatBytes";
@@ -37,7 +44,9 @@ defineEmits<{ select: [fileId: number] }>();
                       ? FileText
                       : file.type === 'video'
                         ? Video
-                        : File
+                        : file.type === 'pptx'
+                          ? Presentation
+                          : File
                   "
                   :size="19" /></span
               ><span class="truncate">{{ file.filename }}</span
@@ -54,7 +63,9 @@ defineEmits<{ select: [fileId: number] }>();
                 ? "MP4"
                 : file.type === "pdf"
                   ? "PDF"
-                  : "FILE"
+                  : file.type === "pptx"
+                    ? "PPTX"
+                    : "FILE"
             }}</span>
           </td>
           <td class="nowrap">{{ formatBytes(file.size_bytes) }}</td>

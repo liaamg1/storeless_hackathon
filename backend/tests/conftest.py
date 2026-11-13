@@ -11,7 +11,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 
 from app.main import app
-from app.repositories import duplicate_repository, file_repository, search_repository, transcription_repository
+from app.repositories import presentation_repository, duplicate_repository, file_repository, search_repository, transcription_repository
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -83,6 +83,9 @@ def database(monkeypatch):
         transcript_search_migration = (ROOT / "database/migrations/005_transcript_search.sql").read_text()
         with connect() as connection:
             connection.execute(transcript_search_migration)
+        with connect() as connection:
+            connection.execute((ROOT / "database/migrations/006_slide_comparison.sql").read_text())
+        monkeypatch.setattr(presentation_repository, "get_connection", connect)
         monkeypatch.setattr(transcription_repository, "get_connection", connect)
         monkeypatch.setattr(file_repository, "get_connection", connect)
         monkeypatch.setattr(search_repository, "get_connection", connect)

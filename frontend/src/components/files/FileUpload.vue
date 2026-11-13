@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { UploadCloud, FileText, Video, X, LoaderCircle } from "@lucide/vue";
+import { uploadPresentation } from "../../services/presentations";
 import { uploadPdf } from "../../services/api";
 import { uploadVideo } from "../../services/transcription";
 import { formatBytes } from "../../utils/formatBytes";
@@ -14,10 +15,14 @@ const error = ref("");
 const success = ref("");
 const dragging = ref(false);
 const kind = computed(() =>
-  file.value?.name.toLowerCase().endsWith(".mp4") ? "video" : "pdf",
+  file.value?.name.toLowerCase().endsWith(".mp4")
+    ? "video"
+    : file.value?.name.toLowerCase().endsWith(".pptx")
+      ? "pptx"
+      : "pdf",
 );
 const supported = computed(
-  () => !!file.value && /\.(pdf|mp4)$/i.test(file.value.name),
+  () => !!file.value && /\.(pdf|mp4|pptx)$/i.test(file.value.name),
 );
 function choose(candidate?: File): void {
   if (uploading.value) return;
@@ -43,6 +48,14 @@ async function submit(): Promise<void> {
         "Upload complete. Transcription continues in the background.";
       await router.push({
         name: "transcription",
+        query: { file: String(result.file_id) },
+      });
+    } else if (file.value.name.toLowerCase().endsWith(".pptx")) {
+      const result = await uploadPresentation(file.value);
+      success.value =
+        "Presentation uploaded. Slide analysis continues in the background.";
+      await router.push({
+        name: "slides",
         query: { file: String(result.file_id) },
       });
     } else {
@@ -104,11 +117,11 @@ onBeforeUnmount(() => dialog.value?.close());
       >
         <UploadCloud :size="32" aria-hidden="true" /><strong
           >Choose a file or drop it here</strong
-        ><span>PDF documents and MP4 recordings</span
+        ><span>PDF, PPTX presentations and MP4 recordings</span
         ><input
           type="file"
-          accept=".pdf,.mp4,application/pdf,video/mp4"
-          aria-label="Choose PDF or MP4 file"
+          accept=".pdf,.pptx,.mp4,application/pdf,video/mp4,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+          aria-label="Choose PDF, PPTX or MP4 file"
           :disabled="uploading"
           @change="choose(($event.target as HTMLInputElement).files?.[0])"
         />
@@ -122,20 +135,24 @@ onBeforeUnmount(() => dialog.value?.close());
               supported
                 ? kind === "video"
                   ? "Video transcription"
-                  : "PDF text extraction"
+                  : kind === "pptx"
+                    ? "Slide comparison"
+                    : "PDF text extraction"
                 : "Unsupported format"
             }}</small
           >
         </div>
       </div>
       <p v-if="file && !supported" class="error" role="alert">
-        Choose a PDF document or MP4 recording.
+        Choose a PDF, PPTX presentation or MP4 recording.
       </p>
       <p v-if="uploading" class="notice" role="status">
         <LoaderCircle :size="16" class="spin" />{{
           kind === "video"
             ? "Uploading and validating recording. Transcription will run in the background."
-            : "Uploading PDF and extracting selectable text…"
+            : kind === "pptx"
+              ? "Uploading presentation. Slide analysis continues in the background."
+              : "Uploading PDF and extracting selectable text…"
         }}
       </p>
       <p v-if="error" class="error notice" role="alert">{{ error }}</p>

@@ -14,7 +14,7 @@ npm run build
 npm run preview
 ```
 
-Use Node 22.18+ or Node 24. `npm test` runs five file-management tests using Node's
+Use Node 22.18+ or Node 24. `npm test` runs six file-management tests using Node's
 built-in test/assert modules and TypeScript stripping. `npm run build` runs
 `vue-tsc -b` and Vite's production build. No component or test framework was added.
 
@@ -34,7 +34,8 @@ docker compose up -d --build --no-deps frontend
 | ---------------- | ---------------------------------------------------------------------- |
 | `/overview`      | File counts, recent files, recent recording jobs, duplicate savings    |
 | `/files`         | Central workspace: filter, sort, page through files and open details   |
-| `/search`        | Search PDF content and video transcripts using the existing search API |
+| `/search`        | Search PDF/PPTX content and video transcripts with the existing API    |
+| `/slides`        | PDF/PPTX rendering, cached slide comparison and review filters         |
 | `/duplicates`    | Scan exact duplicates, inspect expandable groups and potential savings |
 | `/extract`       | Existing PDF upload, metadata, page accordion and page navigation      |
 | `/transcription` | Existing MP4 upload, job polling, readable transcripts and downloads   |
@@ -110,7 +111,7 @@ item to the relevant group in `AppSidebar.vue`.
 
 ## Redesign verification
 
-Executed TypeScript/production build checks and the five Node unit tests. Headless
+Executed TypeScript/production build checks and the six Node unit tests. Headless
 Chromium workflow checks also exercised navigation/active state, sidebar collapse,
 filter combinations, sorting, pagination, long filenames, metadata drawers,
 PDF/MP4 uploads, upload errors/retry, video polling, transcript download, optional
@@ -123,3 +124,22 @@ files, extraction results, transcript downloads, clipboard copying, search,
 duplicates, storage comparisons, and all seven routes at 320px and 390px. Existing
 file metadata was identical before and after these checks. Browser tooling was
 installed temporarily outside the repository; it is not an application dependency.
+
+## Slide Comparison
+
+`/slides` is the presentation workspace. It uploads PDFs/PPTX, polls existing
+background jobs, shows exact/similar/unique summaries, filters and pages slide
+cards, and compares cached thumbnails side by side. Candidate selection changes
+the displayed pair's classification; a matching pHash alone is never labelled Exact.
+Deep links use `/slides?file=<id>`. Existing PDFs can be analyzed without re-upload.
+
+`services/presentations.ts`, `types/presentation.ts` and `usePresentations.ts`
+separate API communication/state from `SlideComparisonView.vue` and
+`components/presentations/SlideComparisonCard.vue`. Files now fetch actual
+presentation statuses when available, recognize PPTX, and route its drawer action
+to Slide Comparison. PDF files retain their extracted-text action and gain a
+Compare slides action. Whole-file duplicate detection remains unchanged.
+
+The root README documents migration, LibreOffice setup, thresholds and the precise
+meaning of exact and heuristic matches. No deletion or byte-savings estimate is
+performed by slide comparison.

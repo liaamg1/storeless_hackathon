@@ -100,3 +100,29 @@ test("long names stay searchable and correct file IDs are used for deep links", 
     query: { file: "1" },
   });
 });
+
+test("PPTX presentations have their own type, status and slide-comparison destination", () => {
+  const input = { ...base, id: 8, filename: "Deck.PPTX", size_bytes: 500 };
+  const presentation = {
+    file_id: 8,
+    filename: "Deck.PPTX",
+    size_bytes: 500,
+    uploaded_at: null,
+    job_id: 11,
+    status: "completed" as const,
+    current_step: "completed",
+    error_message: null,
+    slide_count: 4,
+  };
+  const result = mergeFiles([input], [], [presentation]);
+  assert.equal(fileType(input.filename), "pptx");
+  assert.equal(result[0]?.status, "completed");
+  assert.equal(
+    filterFiles(result, "deck", "pptx", "completed", "name").length,
+    1,
+  );
+  assert.deepEqual(fileDestination(result[0]!), {
+    name: "slides",
+    query: { file: "8" },
+  });
+});

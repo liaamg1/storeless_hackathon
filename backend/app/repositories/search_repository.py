@@ -18,7 +18,8 @@ def get_matching_content(query: str, limit: int) -> list[SearchResult | VideoSea
             WITH search_query AS (
                 SELECT websearch_to_tsquery('simple', %s) AS terms
             ), content AS (
-                SELECT files.id AS file_id, files.filename, 'pdf' AS file_type,
+                SELECT files.id AS file_id, files.filename,
+                       CASE WHEN lower(files.filename) LIKE '%%.pptx' THEN 'pptx' ELSE 'pdf' END AS file_type,
                        pages.page_number, NULL::integer AS segment_id,
                        NULL::bigint AS start_ms, NULL::bigint AS end_ms,
                        pages.extracted_text AS text

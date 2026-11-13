@@ -33,6 +33,10 @@ def create_document(
                        VALUES (%s, %s, %s)""",
                     [(file_id, page.page_number, page.text) for page in pages],
                 )
+            connection.execute(
+                "INSERT INTO processing_jobs (file_id, job_type) VALUES (%s, 'presentation_analysis')",
+                (file_id,),
+            )
     return UploadResult(
         id=file_id, filename=filename, size_bytes=size_bytes, page_count=len(pages)
     )

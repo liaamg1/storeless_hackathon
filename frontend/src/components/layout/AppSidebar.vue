@@ -7,6 +7,7 @@ import {
   Copy,
   FileText,
   Video,
+  Presentation,
   ChartNoAxesColumn,
   PanelLeftClose,
   PanelLeftOpen,
@@ -23,6 +24,7 @@ const groups = [
       { name: "files", label: "Files", icon: Folder },
       { name: "search", label: "Search", icon: Search },
       { name: "duplicates", label: "Duplicates", icon: Copy },
+      { name: "slides", label: "Slide Comparison", icon: Presentation },
     ],
   },
   {

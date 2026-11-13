@@ -3,7 +3,7 @@ import { RouterLink } from "vue-router";
 import { Copy, ChevronRight } from "@lucide/vue";
 import type { DuplicateGroup } from "../../types/duplicate";
 import { formatBytes } from "../../utils/formatBytes";
-import { fileType, formatDate } from "../../utils/files";
+import { fileType, fileDestination, formatDate } from "../../utils/files";
 defineProps<{ group: DuplicateGroup; groupNumber: number }>();
 </script>
 <template>
@@ -49,13 +49,12 @@ defineProps<{ group: DuplicateGroup; groupNumber: number }>();
               <td class="nowrap">{{ formatDate(file.uploaded_at) }}</td>
               <td>
                 <RouterLink
-                  :to="{
-                    name:
-                      fileType(file.filename) === 'video'
-                        ? 'transcription'
-                        : 'extract',
-                    query: { file: String(file.id) },
-                  }"
+                  :to="
+                    fileDestination({
+                      id: file.id,
+                      type: fileType(file.filename),
+                    })
+                  "
                   >Open</RouterLink
                 >
               </td>

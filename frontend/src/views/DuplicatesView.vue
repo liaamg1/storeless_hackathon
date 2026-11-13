@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { RouterLink } from "vue-router";
 import { ScanLine } from "@lucide/vue";
 import EmptyState from "../components/shared/EmptyState.vue";
 import DuplicateSummary from "../components/duplicates/DuplicateSummary.vue";
@@ -53,6 +54,10 @@ onMounted(scanForDuplicates);
       Scanning stored file metadata…
     </p>
     <p v-else-if="error" class="notice error" role="alert">{{ error }}</p>
+    <p class="notice">
+      Looking for reused presentation slides?
+      <RouterLink :to="{ name: 'slides' }">Open Slide Comparison</RouterLink>
+    </p>
     <template v-if="response">
       <DuplicateSummary :summary="response.summary" />
       <EmptyState

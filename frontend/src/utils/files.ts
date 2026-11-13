@@ -1,11 +1,13 @@
+import type { PresentationRecord } from "../types/presentation";
 import type { FileRecord } from "../types/file";
 import type { VideoRecord, JobStatus } from "../types/transcription";
 
 export type FileStatus = JobStatus | "available" | "unknown";
 export interface WorkspaceFile extends FileRecord {
-  type: "pdf" | "video" | "other";
+  type: "pdf" | "pptx" | "video" | "other";
   status: FileStatus;
   video?: VideoRecord;
+  presentation?: PresentationRecord;
 }
 export type FileSort =
   "newest" | "oldest" | "name" | "name-desc" | "size" | "size-asc";
@@ -15,21 +17,33 @@ export function fileType(filename: string): WorkspaceFile["type"] {
     ? "video"
     : /\.pdf$/i.test(filename)
       ? "pdf"
-      : "other";
+      : /\.pptx$/i.test(filename)
+        ? "pptx"
+        : "other";
 }
 export function mergeFiles(
   files: FileRecord[],
   recordings: VideoRecord[],
+  presentations: PresentationRecord[] = [],
 ): WorkspaceFile[] {
   const videos = new Map(recordings.map((video) => [video.file_id, video]));
+  const analyzed = new Map(presentations.map((p) => [p.file_id, p]));
   return files.map((file) => {
     const type = fileType(file.filename);
     const video = videos.get(file.id);
+    const presentation = analyzed.get(file.id);
     return {
       ...file,
       type,
       video,
-      status: video?.status ?? (type === "video" ? "unknown" : "available"),
+      presentation,
+      status:
+        video?.status ??
+        (presentation && presentation.status !== "not_processed"
+          ? presentation.status
+          : type === "video" || type === "pptx"
+            ? "unknown"
+            : "available"),
     };
   });
 }
@@ -68,7 +82,12 @@ export function filterFiles(
 }
 export function fileDestination(file: Pick<WorkspaceFile, "id" | "type">) {
   return {
-    name: file.type === "video" ? "transcription" : "extract",
+    name:
+      file.type === "video"
+        ? "transcription"
+        : file.type === "pptx"
+          ? "slides"
+          : "extract",
     query: { file: String(file.id) },
   };
 }

@@ -24,9 +24,11 @@ def get_storage_savings(file_id: int) -> StorageSavings:
         message='No measurable optimized output file has been generated for this file.',
     )
     if source['file_type'] != 'video':
+        result.components[1] = StorageComponent(kind='images', label='Slide previews (analysis only)', status='unavailable')
         result.message = (
-            'PDF text is stored for search, but no optimized output file is generated. '
-            'Storage comparison is unavailable.'
+            'Slide previews are analysis artifacts, not an optimized replacement. Byte savings are unavailable.'
+            if source['file_type'] == 'pptx' else
+            'PDF text is stored for search, but no optimized output file is generated. Storage comparison is unavailable.'
         )
         return result
     if source['job_status'] in ('queued', 'processing'):

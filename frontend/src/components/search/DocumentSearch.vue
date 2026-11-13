@@ -14,7 +14,11 @@ const filter = ref<"all" | "pdf" | "video">("all");
 const filteredResponse = computed(() => {
   if (!response.value) return null;
   const results = response.value.results.filter(
-    (result) => filter.value === "all" || result.file_type === filter.value,
+    (result) =>
+      filter.value === "all" ||
+      (filter.value === "pdf"
+        ? result.file_type !== "video"
+        : result.file_type === "video"),
   );
   return { ...response.value, results, returned_count: results.length };
 });
@@ -83,7 +87,9 @@ onBeforeUnmount(cancelPendingSearch);
   <section aria-labelledby="search-heading" class="search-page-section">
     <h2 id="search-heading">Search your content</h2>
     <form @submit.prevent="searchDocuments">
-      <label for="document-search">Search PDF text and video transcripts</label>
+      <label for="document-search"
+        >Search document text and video transcripts</label
+      >
       <div class="search-controls">
         <input
           id="document-search"

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
+import SlideComparisonView from "../views/SlideComparisonView.vue";
 import OverviewView from "../views/OverviewView.vue";
 import StorageSavingsView from "../views/StorageSavingsView.vue";
 import DuplicatesView from "../views/DuplicatesView.vue";
@@ -10,6 +11,12 @@ import DocumentSearchView from "../views/DocumentSearchView.vue";
 export const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    {
+      path: "/slides",
+      name: "slides",
+      component: SlideComparisonView,
+      meta: { title: "Slide Comparison" },
+    },
     { path: "/", redirect: "/overview" },
     {
       path: "/overview",

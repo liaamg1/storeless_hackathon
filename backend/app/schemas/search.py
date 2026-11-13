@@ -6,7 +6,7 @@ from pydantic import BaseModel
 class SearchResult(BaseModel):
     file_id: int
     filename: str
-    file_type: Literal["pdf"] = "pdf"
+    file_type: Literal["pdf", "pptx"] = "pdf"
     page_number: int
     snippet: str
     relevance: float

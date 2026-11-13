@@ -104,8 +104,10 @@ def fail_interrupted_jobs() -> int:
     with get_connection() as connection:
         return connection.execute(
             """UPDATE processing_jobs SET status = 'failed', completed_at = NOW(),
-               error_message = 'Processing was interrupted by a worker restart. The original recording is preserved.'
-               WHERE job_type = 'video_transcription' AND status = 'processing'"""
+               error_message = CASE WHEN job_type='presentation_analysis' THEN
+                   'Presentation analysis was interrupted. The original file is preserved.' ELSE
+                   'Processing was interrupted by a worker restart. The original recording is preserved.' END
+               WHERE job_type IN ('video_transcription', 'presentation_analysis') AND status = 'processing'"""
         ).rowcount
 
 
