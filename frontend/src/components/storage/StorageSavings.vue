@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { API_URL } from "../../services/api";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { getStorageSavings } from "../../services/storage";
 import type { StorageSavings } from "../../types/storage";
@@ -126,7 +127,7 @@ function percentage(value: number): string {
             <p class="size-value">{{ mb(comparison.optimized_size_bytes) }}</p>
             <p class="card-detail">
               {{ comparison.optimized_size_bytes.toLocaleString() }} bytes ·
-              Total output
+              Actual download
             </p>
           </template>
           <template v-else>
@@ -209,6 +210,18 @@ function percentage(value: number): string {
         </figure>
       </template>
       <p v-else class="unavailable" role="status">{{ comparison.message }}</p>
+      <p class="measurement-note" v-if="comparison.artifact_format">
+        Measured format: {{ comparison.artifact_format.toUpperCase()
+        }}{{
+          comparison.artifact_format === "html" ? " · timestamps off" : ""
+        }}. The breakdown shows raw payload plus the export packaging
+        adjustment.
+      </p>
+      <a
+        v-if="ready && comparison.download_url"
+        :href="`${API_URL}${comparison.download_url}`"
+        >Download the measured file (.{{ comparison.artifact_format }})</a
+      >
       <div class="output-breakdown">
         <h3>Optimized content</h3>
         <ul>

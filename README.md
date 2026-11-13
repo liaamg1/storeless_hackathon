@@ -426,3 +426,32 @@ recording visuals retain their own result types; **Document text** names the PDF
 text view. Existing backend processing and direct result routes remain compatible.
 The sidebar navigation scrolls independently, including on short mobile screens,
 while branding and sidebar controls remain reachable.
+
+## Search visuals and measured pitch evidence
+
+Video search results now include the greatest-overlap visual from completed image
+analysis, with an earlier-visual tie break. Text-only and pending/failed visual
+results remain searchable. The result opens the matching highlighted section in
+the visual transcript. PowerPoint search links open presentation slides.
+
+For recordings with extracted images, storage savings now compares the original
+against the **exact HTML download with timestamps off**, including base64, markup
+and repeated embedded images. The breakdown includes a packaging adjustment from
+raw text/unique images to the complete download. Recordings without images use the
+existing text download. The comparison exposes its format and a link to the measured
+file. Savings remain potential: originals are retained and exports omit voice/motion.
+
+Use **Storage details → Download the measured file** to verify actual artifact
+bytes. Larger exports report negative savings; unavailable measurements are not
+presented as successful reductions.
+
+See [Data strategy and pitch evidence](docs/DATA_STRATEGY.md) for scenario selection,
+claim limitations, and an explicitly future roadmap for cross-system provenance,
+permission-aware indexing, AI manifests and verified cleanup. Connectors and
+source-system deletion are not claimed as implemented features.
+
+Verified for this update: **256 backend tests passed**, plus the additional
+zero-duration overlap check, all frontend test files and the production build.
+Chromium verified real frame previews, the matching passage deep link, HTML
+response length equal to the measured byte count, artifact-download verification and mobile
+storage layout in the isolated QA database. No source files are deleted.

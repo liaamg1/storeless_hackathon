@@ -4,17 +4,29 @@ import DocumentSearch from "../components/search/DocumentSearch.vue";
 
 const router = useRouter();
 
-function openDocumentPage(fileId: number, pageNumber: number): void {
+function openDocumentPage(
+  fileId: number,
+  pageNumber: number,
+  fileType: "pdf" | "pptx" = "pdf",
+): void {
   void router.push({
-    name: "extract",
+    name: fileType === "pptx" ? "slides" : "extract",
     query: { file: String(fileId), page: String(pageNumber) },
   });
 }
 
-function openTranscriptSegment(fileId: number, segmentId: number): void {
+function openTranscriptSegment(
+  fileId: number,
+  segmentId: number,
+  visual = false,
+): void {
   void router.push({
     name: "transcription",
-    query: { file: String(fileId), segment: String(segmentId) },
+    query: {
+      file: String(fileId),
+      segment: String(segmentId),
+      ...(visual ? { view: "visual" } : {}),
+    },
   });
 }
 </script>

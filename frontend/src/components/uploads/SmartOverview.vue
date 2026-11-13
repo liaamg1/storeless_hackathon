@@ -271,11 +271,13 @@ function percent(value: number) {
     </div>
     <details class="scope-note">
       <summary>How to read these savings</summary>
+
       <p>
         These are separate opportunities, not an amount already saved. Redundant
         copies are excluded from the video total to avoid counting them twice.
-        Video sizes count text and JPEGs; downloadable HTML adds formatting
-        overhead. Slide similarity has no measured byte saving.
+        Video savings use the actual download size, including HTML formatting
+        and embedded images (timestamps off). Slide similarity has no measured
+        byte saving.
       </p>
     </details>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -375,7 +377,7 @@ function percent(value: number) {
           <span
             >Original<b>{{ formatBytes(file.size_bytes) }}</b></span
           ><span
-            >Text + images<b>{{
+            >Download file<b>{{
               formatBytes(measurements[file.file_id]!.optimized_size_bytes!)
             }}</b></span
           ><span

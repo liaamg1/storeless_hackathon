@@ -184,7 +184,10 @@ def test_automatic_queue_storage_images_and_refresh(client, database, recording,
     assert client.post(endpoint).json()['status'] == 'completed'  # Idempotent.
     savings = client.get(f'/files/{file_id}/storage-savings').json()
     text_bytes = client.get(f'/videos/{file_id}/transcript/download').content
-    assert savings['optimized_size_bytes'] == len(text_bytes)+len(image.content)
+    assert savings['optimized_size_bytes'] == len(client.get(f'/videos/{file_id}/visual-transcript/download?timestamps=false').content)
+    assert savings['artifact_format'] == 'html'
+    assert savings['payload_size_bytes'] == len(text_bytes)+len(image.content)
+    assert sum(c['size_bytes'] for c in savings['components'] if c['status']=='measured') == savings['optimized_size_bytes']
     assert savings['components'][1]['file_count'] == 1  # Shared image measured once, from disk.
     assert original.read_bytes() == b'original recording preserved'
     with database() as connection:
@@ -249,3 +252,44 @@ def test_database_failure_is_atomic_and_retry_cleans_interrupted_images(database
     assert not list((uploads/'visuals').rglob('*.jpg'))
     assert speech.get_transcript(created.file_id).segments[0].text == 'Original speech.'
     assert original.is_file()
+
+
+def test_search_attaches_greatest_overlap_visual_and_preserves_speech_without_visual(client,database,recording,uploads):
+    created,_=recording
+    visual_job=repository.claim()
+    image=uploads/'visuals'/'search.jpg';image.parent.mkdir(parents=True);image.write_bytes(b'jpeg')
+    repository.complete(visual_job,[processor.ExtractedFrame(0,800,image,'0'*16,4),processor.ExtractedFrame(800,2000,image,'1'*16,4)])
+    response=client.get('/search',params={'q':'Original'})
+    assert response.status_code==200,response.text
+    result=response.json()['results'][0]
+    frames=repository.frames(created.file_id)
+    # Speech 500–1500 overlaps the second image for 700 ms vs 300 ms for the first.
+    assert result['visual']=={'id':frames[1]['id'],'start_ms':800,'end_ms':2000}
+    assert 'image_path' not in response.text
+    with database() as connection:
+        connection.execute('UPDATE transcript_segments SET start_ms=2100,end_ms=2500 WHERE file_id=%s',(created.file_id,))
+    gap=client.get('/search',params={'q':'Original'}).json()['results'][0]
+    assert gap['visual'] is None and gap['segment_id']==result['segment_id']
+    with database() as connection:
+        connection.execute('UPDATE transcript_segments SET start_ms=600,end_ms=1000 WHERE file_id=%s',(created.file_id,))
+    tied=client.get('/search',params={'q':'Original'}).json()['results'][0]
+    assert tied['visual']['id']==frames[0]['id']
+    with database() as connection:
+        connection.execute('UPDATE transcript_segments SET start_ms=800,end_ms=800 WHERE file_id=%s',(created.file_id,))
+    assert client.get('/search',params={'q':'Original'}).json()['results'][0]['visual'] is None
+    with database() as connection:
+        connection.execute("UPDATE processing_jobs SET status='failed' WHERE file_id=%s AND job_type='video_visuals'",(created.file_id,))
+    assert client.get('/search',params={'q':'Original'}).json()['results'][0]['visual'] is None
+
+
+def test_artifact_measurement_matches_download_and_retains_original(client,database,recording,uploads):
+    created,original=recording
+    image=uploads/'visuals'/'report.jpg';image.parent.mkdir(parents=True);image.write_bytes(b'jpeg'*20000)
+    repository.complete(repository.claim(),[processor.ExtractedFrame(0,10000,image,'0'*16,image.stat().st_size)])
+    download=client.get(f'/videos/{created.file_id}/visual-transcript/download?timestamps=false')
+    result=client.get(f'/files/{created.file_id}/storage-savings').json()
+    assert result['optimized_size_bytes']==len(download.content)
+    assert result['artifact_format']=='html'
+    assert result['storage_saved_bytes']==original.stat().st_size-len(download.content)
+    assert original.is_file()
+    assert client.get('/storage-report').status_code==404

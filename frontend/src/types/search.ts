@@ -13,6 +13,7 @@ export type SearchResult = SearchResultBase &
         segment_id: number;
         start_ms: number;
         end_ms: number;
+        visual?: { id: number; start_ms: number; end_ms: number } | null;
       }
   );
 

@@ -5,8 +5,8 @@ import type { SearchResponse } from "../../types/search";
 import SearchResults from "./SearchResults.vue";
 
 defineEmits<{
-  openPage: [fileId: number, pageNumber: number];
-  openSegment: [fileId: number, segmentId: number];
+  openPage: [fileId: number, pageNumber: number, fileType?: "pdf" | "pptx"];
+  openSegment: [fileId: number, segmentId: number, visual?: boolean];
 }>();
 
 const query = ref("");
@@ -144,9 +144,13 @@ onBeforeUnmount(cancelPendingSearch);
     <SearchResults
       v-else-if="filteredResponse"
       :response="filteredResponse"
-      @open-page="(fileId, pageNumber) => $emit('openPage', fileId, pageNumber)"
+      @open-page="
+        (fileId, pageNumber, fileType) =>
+          $emit('openPage', fileId, pageNumber, fileType)
+      "
       @open-segment="
-        (fileId, segmentId) => $emit('openSegment', fileId, segmentId)
+        (fileId, segmentId, visual) =>
+          $emit('openSegment', fileId, segmentId, visual)
       "
     />
     <p v-if="response && filter !== 'all'" class="muted search-filter-note">

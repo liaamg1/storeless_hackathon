@@ -43,12 +43,23 @@ def get_matching_content(query: str, limit: int) -> list[SearchResult | VideoSea
                 ORDER BY relevance DESC, file_id, page_number, start_ms, segment_id
                 LIMIT %s
             )
-            SELECT file_id, filename, file_type, page_number, segment_id,
-                   start_ms, end_ms, relevance,
+            SELECT matches.file_id, filename, file_type, page_number, segment_id,
+                   matches.start_ms, matches.end_ms, relevance,
+                   visual.id AS visual_id, visual.start_ms AS visual_start_ms, visual.end_ms AS visual_end_ms,
                    ts_headline('simple', text, terms,
                        'StartSel="", StopSel="", MaxWords=35, MinWords=15, MaxFragments=1'
                    ) AS snippet
             FROM matches
+            LEFT JOIN LATERAL (
+                SELECT frame.id, frame.start_ms, frame.end_ms FROM video_frames frame
+                JOIN processing_jobs job ON job.file_id=frame.file_id
+                  AND job.job_type='video_visuals' AND job.status='completed'
+                WHERE matches.file_type='video' AND frame.file_id=matches.file_id
+                  AND matches.end_ms > matches.start_ms
+                  AND frame.start_ms < matches.end_ms AND frame.end_ms > matches.start_ms
+                ORDER BY LEAST(frame.end_ms,matches.end_ms)-GREATEST(frame.start_ms,matches.start_ms) DESC,
+                         frame.start_ms,frame.id LIMIT 1
+            ) visual ON TRUE
             ORDER BY relevance DESC, file_id, page_number, start_ms, segment_id
             """,
             (query, limit),
@@ -60,5 +71,7 @@ def get_matching_content(query: str, limit: int) -> list[SearchResult | VideoSea
         if len(snippet) > MAX_SNIPPET_LENGTH:
             snippet = snippet[:MAX_SNIPPET_LENGTH - 3] + "..."
         result_type = VideoSearchResult if row["file_type"] == "video" else SearchResult
-        results.append(result_type(**{**row, "snippet": snippet}))
+        visual = ({'id': row['visual_id'], 'start_ms': row['visual_start_ms'], 'end_ms': row['visual_end_ms']}
+                  if row['visual_id'] is not None else None)
+        results.append(result_type(**{**row, "snippet": snippet, 'visual': visual}))
     return results

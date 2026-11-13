@@ -19,6 +19,9 @@ class StorageSavings(BaseModel):
     message: str
     original_size_bytes: int
     optimized_size_bytes: int | None = None
+    artifact_format: Literal['txt', 'html'] | None = None
+    download_url: str | None = None
+    payload_size_bytes: int | None = None
     components: list[StorageComponent]
 
     @computed_field

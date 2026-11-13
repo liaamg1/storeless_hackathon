@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   analyzeVisuals,
   downloadVisualTranscript,
@@ -10,7 +10,10 @@ import { formatTimestamp } from "../../utils/formatTimestamp";
 import type { VisualTranscript } from "../../types/transcription";
 import VisualRecommendations from "./VisualRecommendations.vue";
 
-const props = defineProps<{ fileId: number }>();
+const props = defineProps<{
+  fileId: number;
+  selectedSegmentId?: number | null;
+}>();
 const showTimestamps = defineModel<boolean>("showTimestamps", {
   default: false,
 });
@@ -119,6 +122,26 @@ onBeforeUnmount(() => {
   generation++;
   clearTimeout(timer);
 });
+
+watch(
+  () => [result.value, props.selectedSegmentId, showTimestamps.value],
+  async () => {
+    await nextTick();
+    if (!props.selectedSegmentId || !result.value) return;
+    const index = result.value.sections.findIndex((section) =>
+      section.segments.some(
+        (segment) => segment.id === props.selectedSegmentId,
+      ),
+    );
+    if (index < 0) return;
+    const section =
+      document.getElementById(`visual-segment-${props.selectedSegmentId}`) ??
+      document.getElementById(`visual-section-${props.fileId}-${index}`);
+    section?.scrollIntoView({ block: "center" });
+    section?.focus({ preventScroll: true });
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -232,6 +255,12 @@ onBeforeUnmount(() => {
           :key="section.visual?.id ?? `speech-${index}`"
           :id="`visual-section-${fileId}-${index}`"
           class="visual-section"
+          tabindex="-1"
+          :class="{
+            'matched-section': section.segments.some(
+              (segment) => segment.id === selectedSegmentId,
+            ),
+          }"
         >
           <h3 class="visual-section-heading">
             Section {{ index + 1 }}
@@ -263,16 +292,25 @@ onBeforeUnmount(() => {
             v-if="!showTimestamps && section.segments.length"
             class="visual-speech"
           >
-            {{
-              section.segments
-                .map((segment) => segment.text.trim().replace(/\s+/g, " "))
-                .join(" ")
-            }}
+            <template
+              v-for="(segment, segmentIndex) in section.segments"
+              :key="segment.id"
+              >{{ segmentIndex ? " " : ""
+              }}<span
+                :id="`visual-segment-${segment.id}`"
+                tabindex="-1"
+                :class="{ 'matched-passage': segment.id === selectedSegmentId }"
+                >{{ segment.text.trim().replace(/\s+/g, " ") }}</span
+              ></template
+            >
           </p>
           <template v-else>
             <p
               v-for="segment in section.segments"
               :key="segment.id"
+              :id="`visual-segment-${segment.id}`"
+              tabindex="-1"
+              :class="{ 'matched-passage': segment.id === selectedSegmentId }"
               class="visual-speech"
             >
               <small class="visual-time">{{
@@ -291,6 +329,17 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.matched-passage {
+  background: #fff1b8;
+  outline: 2px solid #c89923;
+  border-radius: 3px;
+  scroll-margin-top: 100px;
+}
+.matched-section {
+  outline: 2px solid #c89923;
+  outline-offset: 8px;
+  border-radius: 6px;
+}
 .visual-reader {
   padding: clamp(20px, 4vw, 40px);
 }

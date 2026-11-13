@@ -13,6 +13,9 @@ export interface StorageSavings {
   message: string;
   original_size_bytes: number;
   optimized_size_bytes: number | null;
+  artifact_format: "txt" | "html" | null;
+  download_url: string | null;
+  payload_size_bytes: number | null;
   original_size_mb: number;
   optimized_size_mb: number | null;
   storage_saved_bytes: number | null;

@@ -12,6 +12,12 @@ class SearchResult(BaseModel):
     relevance: float
 
 
+class SearchVisual(BaseModel):
+    id: int
+    start_ms: int
+    end_ms: int
+
+
 class VideoSearchResult(BaseModel):
     file_id: int
     filename: str
@@ -21,6 +27,7 @@ class VideoSearchResult(BaseModel):
     end_ms: int
     snippet: str
     relevance: float
+    visual: SearchVisual | None = None
 
 
 class SearchResponse(BaseModel):

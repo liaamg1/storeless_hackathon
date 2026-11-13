@@ -67,16 +67,19 @@ function percent(value: number): string {
     <template #summary>
       <div class="recommendation-stats">
         <div>
-          <strong>{{ overview.visualSections }}</strong
-          ><span>Visual sections</span>
+          <strong>{{ overview.visualSections }}</strong><span
+            >Visual sections</span
+          >
         </div>
         <div>
-          <strong>{{ overview.uniqueImages }}</strong
-          ><span>Distinct saved images</span>
+          <strong>{{ overview.uniqueImages }}</strong><span
+            >Distinct saved images</span
+          >
         </div>
         <div>
-          <strong>{{ overview.speechSegments }}</strong
-          ><span>Speech segments preserved</span>
+          <strong>{{ overview.speechSegments }}</strong><span
+            >Speech segments preserved</span
+          >
         </div>
       </div>
     </template>
@@ -111,7 +114,7 @@ function percent(value: number): string {
           <div class="recommendation-evidence">
             <span>Original: {{ formatBytes(storage.original_size_bytes) }}</span
             ><span
-              >Text + images:
+              >Download file:
               {{ formatBytes(storage.optimized_size_bytes!) }}</span
             ><span
               >Potential saving:
@@ -127,8 +130,8 @@ function percent(value: number): string {
             duplicate-content score.
           </p>
           <p class="muted">
-            Measurements count the underlying text and JPEGs. The HTML download
-            includes additional formatting and encoding bytes.
+            Measurements use the actual download, including HTML encoding and
+            formatting with timestamps off.
           </p>
         </template>
         <template v-else-if="storage?.status === 'completed'"

@@ -163,6 +163,7 @@ async function saveTranscript(): Promise<void> {
       v-if="transcript && readingMode === 'visual'"
       v-model:show-timestamps="showTimestamps"
       :file-id="transcript.file_id"
+      :selected-segment-id="selectedSegmentId"
       @status="visualStatus = $event"
     >
       <TranscriptViewer

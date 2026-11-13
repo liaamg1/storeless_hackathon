@@ -7,6 +7,7 @@ from app.repositories.file_repository import get_storage_source
 from app.repositories.transcription_repository import get_transcript
 from app.schemas.storage import StorageComponent, StorageSavings
 from app.services.transcript_export import encode_transcript
+from app.services.visual_export import prepare_download
 
 
 class StorageFileNotFoundError(ValueError):
@@ -77,9 +78,26 @@ def get_storage_savings(file_id: int) -> StorageSavings:
         component.size_bytes for component in result.components
         if component.status == 'measured' and component.size_bytes is not None
     )
+    result.payload_size_bytes = result.optimized_size_bytes
+    result.artifact_format = 'txt'
+    result.download_url = f'/videos/{file_id}/transcript/download'
+    if visual_state and paths:
+        # Count the exact streamed download, including repeated images, UTF-8,
+        # base64 and markup. Never assemble a complete export in RAM.
+        _, chunks = prepare_download(file_id, timestamps=False)
+        export_size = sum(len(chunk) for chunk in chunks)
+        result.components[2] = StorageComponent(
+            kind='other', label='HTML packaging adjustment', status='measured',
+            size_bytes=export_size - result.payload_size_bytes,
+        )
+        result.optimized_size_bytes = export_size
+        result.artifact_format = 'html'
+        result.download_url = f'/videos/{file_id}/visual-transcript/download?timestamps=false'
     result.status = 'completed'
     result.message = (
-        'Potential savings based on the exact downloadable text file and any extracted images. '
+        f'Potential savings based on the actual {result.artifact_format.upper()} download'
+        + (' with timestamps off, including embedded images and encoding. ' if result.artifact_format == 'html' else '. ')
+        +
         'The original upload is still retained.'
     )
     if result.original_size_bytes <= 0:
