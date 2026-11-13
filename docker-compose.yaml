@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: restore_postgres
+    environment:
+      POSTGRES_USER: my
+      POSTGRES_PASSWORD: mypass
+      POSTGRES_DB: restore
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./database:/docker-entrypoint-initdb.d:ro
+volumes:
+  postgres_data:

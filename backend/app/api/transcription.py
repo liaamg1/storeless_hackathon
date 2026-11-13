@@ -1,0 +1,92 @@
+import logging
+from collections.abc import Callable
+from typing import TypeVar
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import Response
+
+from app.processors.audio_extractor import MediaProcessingError, MediaToolUnavailableError
+from app.repositories import transcription_repository as repository
+from app.schemas.transcription import ProcessingJob, VideoRecord, VideoTranscript, VideoUploadResult
+from app.services.file_service import InvalidUploadError, UnsupportedFileError, UploadTooLargeError
+from app.services.transcript_export import format_transcript
+from app.services.transcription_service import upload_video
+
+router = APIRouter(tags=['transcription'])
+logger = logging.getLogger(__name__)
+T = TypeVar('T')
+
+
+def database_response(action: Callable[[], T]) -> T:
+    """Map shared read errors without leaking SQL, credentials, or transcript text."""
+    try:
+        return action()
+    except repository.VideoNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except repository.TranscriptNotReadyError as exc:
+        raise HTTPException(409, {
+            'message': str(exc), 'status': exc.status, 'current_step': exc.current_step,
+            'error_message': exc.error_message,
+        }) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error('transcription_read_failed error_type=%s', type(exc).__name__)
+        raise HTTPException(500, 'Recording data is unavailable. Please try again.') from exc
+
+
+@router.post('/videos/upload', response_model=VideoUploadResult, status_code=202)
+def upload_recording(file: UploadFile = File(...)) -> VideoUploadResult:
+    try:
+        return upload_video(file.file, file.filename)
+    except UnsupportedFileError as exc:
+        raise HTTPException(415, str(exc)) from exc
+    except UploadTooLargeError as exc:
+        raise HTTPException(413, str(exc)) from exc
+    except (InvalidUploadError, MediaProcessingError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except MediaToolUnavailableError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        logger.error('video_upload_internal_failure error_type=%s', type(exc).__name__)
+        raise HTTPException(500, 'Could not store or queue the recording. Please try again.') from exc
+    finally:
+        file.file.close()
+
+
+@router.get('/videos', response_model=list[VideoRecord])
+def list_recordings() -> list[VideoRecord]:
+    return database_response(repository.list_videos)
+
+
+@router.get('/videos/{file_id}', response_model=VideoRecord)
+def get_recording(file_id: int) -> VideoRecord:
+    def read() -> VideoRecord:
+        video = repository.get_video(file_id)
+        if video is None:
+            raise repository.VideoNotFoundError('Recording not found.')
+        return video
+    return database_response(read)
+
+
+@router.get('/jobs/{job_id}', response_model=ProcessingJob)
+def get_processing_job(job_id: int) -> ProcessingJob:
+    def read() -> ProcessingJob:
+        job = repository.get_job(job_id)
+        if job is None:
+            raise HTTPException(404, 'Processing job not found.')
+        return job
+    return database_response(read)
+
+
+@router.get('/videos/{file_id}/transcript', response_model=VideoTranscript)
+def get_video_transcript(file_id: int) -> VideoTranscript:
+    return database_response(lambda: repository.get_transcript(file_id))
+
+
+@router.get('/videos/{file_id}/transcript/download')
+def download_transcript(file_id: int) -> Response:
+    transcript = database_response(lambda: repository.get_transcript(file_id))
+    return Response(format_transcript(transcript), media_type='text/plain', headers={
+        'Content-Disposition': f'attachment; filename="transcript-{file_id}.txt"',
+    })
