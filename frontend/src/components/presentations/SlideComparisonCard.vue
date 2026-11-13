@@ -69,8 +69,7 @@ const labels = {
         <figcaption>
           <strong :title="result.slide.filename">{{
             result.slide.filename
-          }}</strong
-          ><span
+          }}</strong><span
             >Selected presentation · Slide {{ result.slide.slide_number }}</span
           >
         </figcaption>
@@ -89,8 +88,7 @@ const labels = {
         <figcaption>
           <strong :title="match.slide.filename">{{
             match.slide.filename
-          }}</strong
-          ><span
+          }}</strong><span
             >Matching presentation · Slide {{ match.slide.slide_number }}</span
           >
         </figcaption>
@@ -107,9 +105,46 @@ const labels = {
     <p v-else class="muted">
       No sufficiently similar slide found in another analyzed presentation.
     </p>
+    <div class="slide-recommendation">
+      <strong>Suggested action</strong>
+      <p v-if="match?.classification === 'exact'">
+        Reuse one copy of this slide. Its normalized image and extracted text
+        match {{ match.slide.filename }}, slide {{ match.slide.slide_number }}.
+        Check presentation context before removing a repeated slide.
+      </p>
+      <p v-else-if="match">
+        Review before removing or merging. The {{ match.similarity_percent }}%
+        score measures visual similarity; check changed wording, numbers and
+        diagrams side by side.
+      </p>
+      <p v-else>
+        Keep this slide. No matching slide was found in another analyzed
+        presentation.
+      </p>
+    </div>
     <details v-if="result.slide.text.trim()" class="slide-text">
       <summary>Extracted slide text</summary>
       <pre>{{ result.slide.text }}</pre>
     </details>
   </article>
 </template>
+
+<style scoped>
+.slide-recommendation {
+  border-left: 3px solid #8daac8;
+  background: #f4f8fd;
+  border-radius: 0 8px 8px 0;
+  padding: 12px 16px;
+  margin: 18px 0;
+}
+.slide-recommendation strong {
+  font-size: 12px;
+}
+.slide-recommendation p {
+  font-size: 13px;
+  line-height: 1.75;
+  margin: 8px 0 0;
+  color: #53677f;
+  overflow-wrap: anywhere;
+}
+</style>

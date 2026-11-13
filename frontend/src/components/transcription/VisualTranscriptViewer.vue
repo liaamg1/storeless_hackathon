@@ -8,6 +8,7 @@ import {
 } from "../../services/transcription";
 import { formatTimestamp } from "../../utils/formatTimestamp";
 import type { VisualTranscript } from "../../types/transcription";
+import VisualRecommendations from "./VisualRecommendations.vue";
 
 const props = defineProps<{ fileId: number }>();
 const showTimestamps = defineModel<boolean>("showTimestamps", {
@@ -192,13 +193,52 @@ onBeforeUnmount(() => {
         No distinct visual content was detected. The speech transcript is shown
         below.
       </p>
+      <details v-if="hasVisuals" class="visual-outline">
+        <summary>
+          Document outline · {{ result.sections.length }} sections
+        </summary>
+        <ol>
+          <li
+            v-for="(section, index) in result.sections"
+            :key="section.visual?.id ?? `outline-${index}`"
+          >
+            <a :href="`#visual-section-${fileId}-${index}`"
+              >Section {{ index + 1 }} ·
+              {{ section.visual ? "Visual and transcript" : "Speech only"
+              }}<span v-if="showTimestamps">
+                ·
+                {{
+                  formatTimestamp(
+                    section.visual?.start_ms ??
+                      section.segments[0]?.start_ms ??
+                      0,
+                  )
+                }}</span
+              ></a
+            >
+          </li>
+        </ol>
+      </details>
+      <VisualRecommendations
+        v-if="result.status === 'completed'"
+        :transcript="result"
+        :downloading="downloading"
+        @download="saveDocument"
+      />
       <slot v-if="!hasVisuals" />
       <template v-else>
         <article
           v-for="(section, index) in result.sections"
           :key="section.visual?.id ?? `speech-${index}`"
+          :id="`visual-section-${fileId}-${index}`"
           class="visual-section"
         >
+          <h3 class="visual-section-heading">
+            Section {{ index + 1 }}
+            <span>{{
+              section.visual ? "Visual and transcript" : "Speech only"
+            }}</span>
+          </h3>
           <template v-if="section.visual">
             <p v-if="showTimestamps" class="visual-time">
               {{ formatTimestamp(section.visual.start_ms) }} –
@@ -289,10 +329,33 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 .visual-section {
+  scroll-margin-top: 90px;
   max-width: 76ch;
   margin: 0 auto 28px;
   border-bottom: 1px solid #e1e7ef;
   padding-bottom: 20px;
+}
+.visual-outline {
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 26px;
+  font-size: 13px;
+}
+.visual-outline li {
+  padding: 6px 0;
+}
+.visual-section-heading {
+  font-size: 14px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 18px 0;
+}
+.visual-section-heading span {
+  font-size: 12px;
+  color: #66768c;
+  font-weight: normal;
 }
 .visual-section img {
   display: block;

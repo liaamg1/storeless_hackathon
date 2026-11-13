@@ -262,3 +262,53 @@ Verified for this update: **55 backend tests** covering exports, visual processi
 and transcription, **6 frontend tests**, the production build, and Chromium checks
 of actual downloads, offline images, both timestamp settings, shared preferences,
 speech-only fallback, and 320px/390px controls.
+
+## Structured cleanup recommendations
+
+Recommendations now appear on **Duplicates**, **Slide Comparison**, and **Visual
+Transcript**. They are suggestions for review: the application does not delete
+files or images.
+
+- **Duplicates:** groups are ordered by potential savings. Each group nominates
+  the earliest known upload to keep (file ID breaks ties), labels the remaining
+  copies **Delete duplicate**, and exposes file IDs and match evidence. This uses
+  the existing recorded SHA-256 and byte-size comparison; it does not reread the
+  originals. Review filenames, links and generated processing results before
+  deciding which copy to keep, since identical uploads can have different results.
+- **Slide Comparison:** recommendations aggregate matches separately for each
+  other presentation. Coverage counts each selected slide once, regardless of
+  how many matching pages it has. A removal review requires every slide in the
+  proposed removal candidate to be covered by one retained presentation: either
+  exact normalized image/text matches, or an average visual score of at least
+  95%. Similarity is not a percentage of identical content. Partial overlap
+  recommends retaining unmatched content and reusing individual slides. Reciprocal
+  matches choose the same retained copy, and stronger recommendations take
+  precedence over conflicting keep/remove suggestions. Additional pair evidence
+  remains available. Check slide order, repetition, notes, animations and
+  attachments before removing a presentation; slide equality is not file equality.
+- **Visual Transcript:** a linked section outline and numbered sections organize
+  the document. Recommended steps cover downloading and verifying the HTML,
+  reviewing replacement of the MP4 only when measured savings are positive, and
+  retaining the original if measurements are unavailable or the output is larger.
+  Audio, motion and full-resolution screens are not preserved by the text/image
+  representation. Repeated intervals that already share an image file are
+  identified using a backend-generated image reference; a perceptual-hash
+  collision alone is not reported as a reused image. No extra image deletion is
+  suggested when reuse is already in place.
+
+The recommendation rules reuse current API results, cached comparisons and actual
+storage measurements. No new framework, model, database table or migration is
+needed. Frontend rule tests cover deterministic retained copies, full vs partial
+coverage, many-to-one matches, perceptual collisions, the 95% review threshold,
+conflicting suggestions and actual image reuse. Run `npm --prefix frontend test`
+and `npm --prefix frontend run build`; backend visual and export tests cover the
+additive image-reference response field and existing downloads.
+
+Verified for recommendations: **12 new rule tests** and the **6 existing frontend
+checks** passed, along with the frontend production build and **27 backend visual
+processing/export tests**. Chromium checks used generated files in the isolated QA
+database to verify exact duplicate plans, full and partial presentation coverage,
+near-match review labels, image reuse, measured positive and negative savings,
+document outline, timestamps, HTML download, and 320px/390px layouts. Existing
+file metadata, extracted page text and transcript fingerprints were unchanged by
+the local Docker update.

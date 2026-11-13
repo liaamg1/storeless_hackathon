@@ -59,6 +59,7 @@ export interface VideoVisual {
   end_ms: number;
   image_hash: string;
   size_bytes: number;
+  image_reference_id: number;
 }
 
 export interface VisualTranscript {

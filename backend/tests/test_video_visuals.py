@@ -176,6 +176,7 @@ def test_automatic_queue_storage_images_and_refresh(client, database, recording,
     assert 'image_path' not in result.text
     assert data['sections'][0]['segments'][0]['text'] == 'Original speech.'
     frame_id = data['sections'][0]['visual']['id']
+    assert [section['visual']['image_reference_id'] for section in data['sections']] == [frame_id, frame_id]
     image = client.get(f'/videos/{file_id}/visuals/{frame_id}/image')
     assert image.status_code == 200 and image.content == b'\xff\xd8jpeg content'
     assert client.get(f'/videos/{file_id+1}/visuals/{frame_id}/image').status_code == 404

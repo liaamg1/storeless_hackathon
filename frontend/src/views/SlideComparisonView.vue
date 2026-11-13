@@ -5,6 +5,7 @@ import { RefreshCw, Presentation, Upload } from "@lucide/vue";
 import { usePresentations } from "../composables/usePresentations";
 import type { SlideClassification } from "../types/presentation";
 import SlideComparisonCard from "../components/presentations/SlideComparisonCard.vue";
+import PresentationRecommendations from "../components/presentations/PresentationRecommendations.vue";
 import EmptyState from "../components/shared/EmptyState.vue";
 const route = useRoute(),
   router = useRouter();
@@ -173,35 +174,41 @@ function refresh(): void {
       <div>Presentations analyzed</div>
       <strong>{{
         listLoading || listError ? "—" : recordsAnalyzed.length
-      }}</strong
-      ><small>Across the workspace</small>
+      }}</strong><small>Across the workspace</small>
     </div>
     <div class="kpi-card">
       <div>Total slides analyzed</div>
-      <strong>{{ listLoading || listError ? "—" : slideCount }}</strong
-      ><small>Cached slide images and hashes</small>
+      <strong>{{ listLoading || listError ? "—" : slideCount }}</strong><small
+        >Cached slide images and hashes</small
+      >
     </div>
     <div class="kpi-card">
       <div>Exact matches</div>
-      <strong>{{ comparison?.summary.exact_slides ?? "—" }}</strong
-      ><small>Slides in selected presentation</small>
+      <strong>{{ comparison?.summary.exact_slides ?? "—" }}</strong><small
+        >Slides in selected presentation</small
+      >
     </div>
     <div class="kpi-card">
       <div>Similar · review required</div>
-      <strong>{{ comparison?.summary.similar_slides ?? "—" }}</strong
-      ><small>Slides in selected presentation</small>
+      <strong>{{ comparison?.summary.similar_slides ?? "—" }}</strong><small
+        >Slides in selected presentation</small
+      >
     </div>
     <div class="kpi-card">
       <div>Unique slides</div>
-      <strong>{{ comparison?.summary.unique_slides ?? "—" }}</strong
-      ><small>Slides in selected presentation</small>
+      <strong>{{ comparison?.summary.unique_slides ?? "—" }}</strong><small
+        >Slides in selected presentation</small
+      >
     </div>
   </div>
   <template v-if="comparison"
-    ><p class="notice">
-      {{
-        comparison.summary.exact_slides + comparison.summary.similar_slides
-      }}
+    ><PresentationRecommendations
+      :comparison="comparison"
+      :records="presentations"
+    />
+    <h2>Slide-by-slide evidence</h2>
+    <p class="notice">
+      {{ comparison.summary.exact_slides + comparison.summary.similar_slides }}
       matching slides identified across
       {{ comparison.summary.matching_presentations }} other presentations. These
       are potential reuse opportunities; no storage has been reclaimed.

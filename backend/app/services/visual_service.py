@@ -62,6 +62,11 @@ def get_visual_transcript(file_id: int) -> dict:
     }
     transcript = get_transcript(file_id) if video.status == 'completed' else None
     frames = repository.frames(file_id) if state['status'] == 'completed' else []
+    image_references = {}
+    for frame in frames:
+        # Intervals can revisit a saved image. Expose its first ID, never its path,
+        # so the UI can distinguish existing disk reuse from suggested cleanup.
+        frame['image_reference_id'] = image_references.setdefault(frame['image_path'], frame['id'])
     return {
         'file_id': file_id, 'filename': video.filename, **state,
         'speech_status': video.status,
