@@ -43,4 +43,5 @@ export interface VideoTranscript {
   language: string | null;
   status: "completed";
   segments: TranscriptSegment[];
+  paragraphs: number[][];
 }

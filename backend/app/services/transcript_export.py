@@ -1,22 +1,15 @@
+"""Readable, compact UTF-8 exports of persisted transcripts."""
 from app.schemas.transcription import VideoTranscript
 
 
-def format_timestamp(milliseconds: int) -> str:
-    """Keep millisecond precision in readable exported timestamp ranges."""
-    hours, remainder = divmod(milliseconds, 3_600_000)
-    minutes, remainder = divmod(remainder, 60_000)
-    seconds, millis = divmod(remainder, 1000)
-    return f"{hours:02}:{minutes:02}:{seconds:02}.{millis:03}"
-
-
 def format_transcript(transcript: VideoTranscript) -> str:
-    """Export persisted text with timestamps; no inference runs during download."""
-    lines = [f"File: {transcript.filename}", "Status: Completed", ""]
-    for segment in transcript.segments:
-        lines.extend([
-            f"[{format_timestamp(segment.start_ms)} – {format_timestamp(segment.end_ms)}]",
-            segment.text, "",
-        ])
-    if not transcript.segments:
-        lines.append("No speech was detected.")
-    return "\n".join(lines) + "\n"
+    """Keep every spoken word in paragraphs, without timestamp or status clutter."""
+    segments = {segment.id: " ".join(segment.text.split()) for segment in transcript.segments}
+    paragraphs = [" ".join(segments[id] for id in paragraph) for paragraph in transcript.paragraphs]
+    title = " ".join(transcript.filename.split())
+    return title + "\n\n" + "\n\n".join(paragraphs or ["No speech was detected."]) + "\n"
+
+
+def encode_transcript(transcript: VideoTranscript) -> bytes:
+    """The actual downloadable file bytes, also used for storage measurement."""
+    return format_transcript(transcript).encode('utf-8')

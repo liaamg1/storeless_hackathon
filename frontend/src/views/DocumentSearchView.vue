@@ -10,8 +10,15 @@ function openDocumentPage(fileId: number, pageNumber: number): void {
     query: { file: String(fileId), page: String(pageNumber) },
   });
 }
+
+function openTranscriptSegment(fileId: number, segmentId: number): void {
+  void router.push({
+    name: "transcription",
+    query: { file: String(fileId), segment: String(segmentId) },
+  });
+}
 </script>
 
 <template>
-  <DocumentSearch @open-page="openDocumentPage" />
+  <DocumentSearch @open-page="openDocumentPage" @open-segment="openTranscriptSegment" />
 </template>

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import VideoUpload from "../components/transcription/VideoUpload.vue";
 import TranscriptionProgress from "../components/transcription/TranscriptionProgress.vue";
+import StorageSavings from "../components/storage/StorageSavings.vue";
 import TranscriptViewer from "../components/transcription/TranscriptViewer.vue";
 import { useTranscription } from "../composables/useTranscription";
 import { downloadTranscript } from "../services/transcription";
@@ -15,6 +16,11 @@ const {
   uploading, uploadError, uploadRecording, selectedVideo, job, transcript,
   loadingStatus, statusError, selectVideo, clearSelection,
 } = useTranscription();
+const selectedSegmentId = computed(() => {
+  const value = route.query.segment;
+  const id = typeof value === "string" ? Number(value) : 0;
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+});
 const downloading = ref(false);
 const downloadError = ref("");
 let viewIsActive = true;
@@ -44,6 +50,7 @@ function retryStatus(): void {
 async function saveTranscript(): Promise<void> {
   if (!transcript.value || downloading.value) return;
   const fileId = transcript.value.file_id;
+  const filename = `${transcript.value.filename.replace(/\.mp4$/i, "") || `transcript-${fileId}`}.txt`;
   downloading.value = true;
   downloadError.value = "";
   try {
@@ -51,7 +58,7 @@ async function saveTranscript(): Promise<void> {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `transcript-${fileId}.txt`;
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
   } catch (error) {
@@ -83,10 +90,11 @@ async function saveTranscript(): Promise<void> {
       <p class="error" role="alert">{{ statusError }}</p>
       <button type="button" @click="retryStatus">Retry status</button>
     </div>
-    <TranscriptionProgress v-if="selectedVideo && job" :video="selectedVideo" :job="job" />
+    <TranscriptionProgress v-if="selectedVideo && job && !transcript" :video="selectedVideo" :job="job" />
+    <StorageSavings v-if="selectedVideo" :file-id="selectedVideo.file_id" :refresh-key="job?.status" />
     <TranscriptViewer
       v-if="transcript" :transcript="transcript" :downloading="downloading"
-      :download-error="downloadError" @download="saveTranscript"
+      :download-error="downloadError" :selected-segment-id="selectedSegmentId" @download="saveTranscript"
     />
   </div>
 </template>

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 JobStatus = Literal["queued", "processing", "completed", "failed"]
 ProcessingStep = Literal["queued", "validating_video", "extracting_audio", "transcribing_audio", "saving_transcript", "completed"]
@@ -49,3 +49,34 @@ class VideoTranscript(BaseModel):
     language: str | None
     status: Literal["completed"] = "completed"
     segments: list[StoredTranscriptSegment]
+
+    @computed_field
+    @property
+    def paragraphs(self) -> list[list[int]]:
+        """Group segment IDs for reading, keeping one copy of the original text.
+
+        Prefer sentence endings near 600 characters, or pauses of two seconds.
+        Segments remain unchanged so search links still identify exact passages.
+        """
+        paragraphs: list[list[int]] = []
+        current: list[int] = []
+        length = 0
+        previous: StoredTranscriptSegment | None = None
+        for segment in self.segments:
+            text = " ".join(segment.text.split())
+            if not text:
+                continue
+            if current and previous is not None and (
+                segment.start_ms - previous.end_ms >= 2000
+                or (length >= 600 and previous.text.rstrip().endswith((".", "!", "?", "。", "！", "？")))
+                or length >= 1000
+            ):
+                paragraphs.append(current)
+                current = []
+                length = 0
+            current.append(segment.id)
+            length += len(text) + 1
+            previous = segment
+        if current:
+            paragraphs.append(current)
+        return paragraphs

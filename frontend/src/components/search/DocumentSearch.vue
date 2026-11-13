@@ -4,7 +4,10 @@ import { fetchDocumentSearchResults } from "../../services/search";
 import type { SearchResponse } from "../../types/search";
 import SearchResults from "./SearchResults.vue";
 
-defineEmits<{ openPage: [fileId: number, pageNumber: number] }>();
+defineEmits<{
+  openPage: [fileId: number, pageNumber: number];
+  openSegment: [fileId: number, segmentId: number];
+}>();
 
 const query = ref("");
 const response = ref<SearchResponse | null>(null);
@@ -55,9 +58,9 @@ onBeforeUnmount(cancelPendingSearch);
 
 <template>
   <section aria-labelledby="search-heading">
-    <h2 id="search-heading">Search documents</h2>
+    <h2 id="search-heading">Search documents and recordings</h2>
     <form @submit.prevent="searchDocuments">
-      <label for="document-search">Search extracted PDF text</label>
+      <label for="document-search">Search PDF text and video transcripts</label>
       <div class="search-controls">
         <input
           id="document-search" v-model="query" type="search" maxlength="200"
@@ -67,16 +70,17 @@ onBeforeUnmount(cancelPendingSearch);
         <button type="button" @click="clearSearch">Clear</button>
       </div>
       <p id="search-help">
-        Use words, "quoted phrases", OR, or -excluded terms. Shows up to 20 matching pages.
+        Use words, "quoted phrases", OR, or -excluded terms. Shows up to 20 matching pages or transcript segments.
       </p>
     </form>
-    <p v-if="loading" role="status">Searching documents...</p>
+    <p v-if="loading" role="status">Searching documents and recordings...</p>
     <p v-else-if="error" class="error" role="alert">{{ error }}</p>
     <SearchResults
       v-else-if="response" :response="response"
       @open-page="(fileId, pageNumber) => $emit('openPage', fileId, pageNumber)"
+      @open-segment="(fileId, segmentId) => $emit('openSegment', fileId, segmentId)"
     />
-    <p v-else>Enter a query to search your saved PDF text.</p>
+    <p v-else>Enter a query to search your saved PDF text and video transcripts.</p>
   </section>
 </template>
 

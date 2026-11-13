@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Callable
 from typing import TypeVar
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -9,7 +10,7 @@ from app.processors.audio_extractor import MediaProcessingError, MediaToolUnavai
 from app.repositories import transcription_repository as repository
 from app.schemas.transcription import ProcessingJob, VideoRecord, VideoTranscript, VideoUploadResult
 from app.services.file_service import InvalidUploadError, UnsupportedFileError, UploadTooLargeError
-from app.services.transcript_export import format_transcript
+from app.services.transcript_export import encode_transcript
 from app.services.transcription_service import upload_video
 
 router = APIRouter(tags=['transcription'])
@@ -87,6 +88,10 @@ def get_video_transcript(file_id: int) -> VideoTranscript:
 @router.get('/videos/{file_id}/transcript/download')
 def download_transcript(file_id: int) -> Response:
     transcript = database_response(lambda: repository.get_transcript(file_id))
-    return Response(format_transcript(transcript), media_type='text/plain', headers={
-        'Content-Disposition': f'attachment; filename="transcript-{file_id}.txt"',
+    filename = transcript.filename.rsplit('.', 1)[0] + '.txt'
+    return Response(encode_transcript(transcript), media_type='text/plain', headers={
+        'Content-Disposition': (
+            f'attachment; filename="transcript-{file_id}.txt"; '
+            f"filename*=UTF-8''{quote(filename, safe='')}"
+        ),
     })

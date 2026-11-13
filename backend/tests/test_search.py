@@ -7,7 +7,7 @@ import pytest
 from app.processors.pdf_processor import ExtractedPage
 from app.repositories.file_repository import create_document
 from app.services import search_service
-from app.services.search_service import InvalidSearchQuery, search_document_pages
+from app.services.search_service import InvalidSearchQuery, search_content
 
 
 @pytest.fixture
@@ -158,8 +158,8 @@ def test_normalization_and_response_semantics(monkeypatch):
     def get_matches(query, limit):
         calls.append((query, limit))
         return []
-    monkeypatch.setattr(search_service, "get_matching_pages", get_matches)
-    response = search_document_pages('  "network   architecture"  -security ', 7)
+    monkeypatch.setattr(search_service, "get_matching_content", get_matches)
+    response = search_content('  "network   architecture"  -security ', 7)
     assert calls == [('"network architecture" -security', 7)]
     assert response.query == '"network architecture" -security'
     assert response.returned_count == 0
@@ -168,13 +168,13 @@ def test_normalization_and_response_semantics(monkeypatch):
 @pytest.mark.parametrize("query,limit", [(" ", 20), ("x" * 201, 20), ("x", 0), ("x", 101)])
 def test_service_validation(query, limit):
     with pytest.raises(InvalidSearchQuery):
-        search_document_pages(query, limit)
+        search_content(query, limit)
 
 
 def test_database_failure_is_private(client, monkeypatch, caplog):
     def fail(query, limit):
         raise psycopg.OperationalError("postgresql://secret credentials; SQL; document contents")
-    monkeypatch.setattr(search_service, "get_matching_pages", fail)
+    monkeypatch.setattr(search_service, "get_matching_content", fail)
     response = client.get("/search", params={"q": "network"})
     assert response.status_code == 500
     assert response.json()["detail"] == "Document search is unavailable. Please try again."
@@ -228,3 +228,136 @@ def test_search_migration_is_repeatable_and_preserves_pages(database, documents)
             ("network",),
         ).fetchall()
         assert "idx_document_pages_fts" in str(plan)
+
+
+@pytest.fixture
+def recordings(database):
+    def store(filename, segments, status="completed"):
+        with database() as connection:
+            file_id = connection.execute(
+                """INSERT INTO files (filename, size_bytes, sha256, file_type, duration_ms)
+                   VALUES (%s, 100, 'video-test', 'video', 120000) RETURNING id""",
+                (filename,),
+            ).fetchone()["id"]
+            connection.execute(
+                """INSERT INTO processing_jobs (file_id, job_type, status)
+                   VALUES (%s, 'video_transcription', %s)""", (file_id, status),
+            )
+            ids = [connection.execute(
+                """INSERT INTO transcript_segments (file_id, start_ms, end_ms, text)
+                   VALUES (%s, %s, %s, %s) RETURNING id""", (file_id, start, end, text),
+            ).fetchone()["id"] for start, end, text in segments]
+        return file_id, ids
+    return store
+
+
+def test_search_combines_pdf_and_video_results(client, documents, recordings):
+    file_id, ids = recordings("architecture.mp4", [
+        (12500, 18000, "A network architecture overview for engineers."),
+        (40000, 45000, "Encryption protects communication."),
+    ])
+    results = search(client, "network architecture")["results"]
+    assert {result["file_type"] for result in results} == {"pdf", "video"}
+    assert len(results) == 4
+    video = next(result for result in results if result["file_type"] == "video")
+    assert video["file_id"] == file_id
+    assert video["filename"] == "architecture.mp4"
+    assert video["segment_id"] == ids[0]
+    assert (video["start_ms"], video["end_ms"]) == (12500, 18000)
+    assert "network architecture" in video["snippet"]
+    assert "page_number" not in video
+    assert all("segment_id" not in result for result in results if result["file_type"] == "pdf")
+    assert [r["relevance"] for r in results] == sorted(
+        [r["relevance"] for r in results], reverse=True,
+    )
+    # The returned segment identity opens the exact persisted transcript passage.
+    response = client.get(f"/videos/{file_id}/transcript")
+    assert response.status_code == 200
+    segment = next(s for s in response.json()["segments"] if s["id"] == video["segment_id"])
+    assert segment["start_ms"] == video["start_ms"]
+    assert video["snippet"] in segment["text"]
+
+
+def test_video_word_phrase_and_exclusion_queries(client, recordings):
+    _, ids = recordings("meeting.mp4", [
+        (0, 1000, "Network architecture connects components."),
+        (1000, 2000, "Architecture describes components in a network."),
+        (2000, 3000, "Network security needs encryption."),
+        (3000, 4000, ""),
+    ])
+    assert {r["segment_id"] for r in search(client, "NETWORK")["results"]} == set(ids[:3])
+    assert [r["segment_id"] for r in search(client, '"network architecture"')["results"]] == [ids[0]]
+    assert {r["segment_id"] for r in search(client, "network -security")["results"]} == set(ids[:2])
+    assert search(client, "unmentionedword")["results"] == []
+
+
+def test_only_completed_transcripts_are_searchable(client, recordings):
+    for status in ("queued", "processing", "failed"):
+        recordings(f"{status}.mp4", [(0, 1000, "pendingtoken")], status)
+    recordings("silent.mp4", [])
+    assert search(client, "pendingtoken")["results"] == []
+
+
+def test_combined_limit_and_stable_segment_order(client, documents, recordings):
+    _, _, store = documents
+    pdf = store("equal.pdf", ["equalcontent"])
+    file_id, ids = recordings("equal.mp4", [
+        (1000, 2000, "equalcontent"),
+        (0, 1000, "equalcontent"),
+        (0, 1000, "equalcontent"),
+    ])
+    for _ in range(2):
+        results = search(client, "equalcontent")["results"]
+        assert results[0]["file_id"] == pdf.id
+        assert [r["segment_id"] for r in results[1:]] == [ids[1], ids[2], ids[0]]
+        assert all(r["file_id"] == file_id for r in results[1:])
+    limited = search(client, "equalcontent", limit=2)
+    assert limited["returned_count"] == len(limited["results"]) == 2
+    assert {r["file_type"] for r in limited["results"]} == {"pdf", "video"}
+
+
+def test_video_snippets_are_bounded_plain_text(client, recordings):
+    recordings("long.mp4", [(0, 1000, "searchtoken <script>alert('x')</script> " + "x" * 700)])
+    result = search(client, "searchtoken")["results"][0]
+    assert len(result["snippet"]) <= 500
+    assert "<b>" not in result["snippet"]
+
+
+def test_transcript_search_migration_preserves_existing_segments(database, recordings, client):
+    from conftest import ROOT
+    file_id, ids = recordings("existing.mp4", [(0, 1000, "existingtoken")])
+    migration = (ROOT / "database/migrations/005_transcript_search.sql").read_text()
+    with database() as connection:
+        before = connection.execute("SELECT * FROM transcript_segments ORDER BY id").fetchall()
+        connection.execute("DROP INDEX idx_transcript_segments_fts")
+    for _ in range(2):
+        with database() as connection:
+            connection.execute(migration)
+    with database() as connection:
+        assert connection.execute("SELECT * FROM transcript_segments ORDER BY id").fetchall() == before
+        connection.execute("SET LOCAL enable_seqscan = off")
+        plan = connection.execute(
+            "EXPLAIN SELECT id FROM transcript_segments "
+            "WHERE to_tsvector('simple', text) @@ websearch_to_tsquery('simple', %s)",
+            ("existingtoken",),
+        ).fetchall()
+        assert "idx_transcript_segments_fts" in str(plan)
+    assert search(client, "existingtoken")["results"][0]["segment_id"] == ids[0]
+
+
+@pytest.mark.parametrize("ending", ["", "\n\n", "\\\n\\\n"])
+def test_search_finds_failures_in_existing_transcripts(client, recordings, ending):
+    text = (
+        "Some of the most successful people in the world are the ones "
+        "who've had the most failures." + ending
+    )
+    file_id, ids = recordings("speech.mp4", [(12500, 23000, text)])
+    for query in ("failures", "FAILURES", '"most failures"'):
+        results = search(client, query)["results"]
+        assert len(results) == 1
+        result = results[0]
+        assert result["file_type"] == "video"
+        assert result["file_id"] == file_id
+        assert result["segment_id"] == ids[0]
+        assert result["start_ms"] == 12500
+        assert "failures" in result["snippet"]

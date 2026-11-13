@@ -54,3 +54,15 @@ def get_document_pages(file_id: int) -> DocumentDetails | None:
         page_count=len(pages), status="completed" if pages else "not_processed",
         pages=pages,
     )
+
+
+def get_storage_source(file_id: int) -> dict | None:
+    """Retrieve the actual upload byte count and its existing processing state."""
+    with get_connection() as connection:
+        return connection.execute(
+            """SELECT f.id AS file_id, f.filename, f.size_bytes, f.file_type,
+                      j.status AS job_status
+               FROM files f LEFT JOIN processing_jobs j
+                 ON j.file_id = f.id AND j.job_type = 'video_transcription'
+               WHERE f.id = %s""", (file_id,),
+        ).fetchone()

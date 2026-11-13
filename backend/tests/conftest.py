@@ -80,6 +80,9 @@ def database(monkeypatch):
         for _ in range(2):
             with connect() as connection:
                 connection.execute(video_migration)
+        transcript_search_migration = (ROOT / "database/migrations/005_transcript_search.sql").read_text()
+        with connect() as connection:
+            connection.execute(transcript_search_migration)
         monkeypatch.setattr(transcription_repository, "get_connection", connect)
         monkeypatch.setattr(file_repository, "get_connection", connect)
         monkeypatch.setattr(search_repository, "get_connection", connect)

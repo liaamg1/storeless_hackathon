@@ -85,8 +85,10 @@ def test_pipeline_saves_ordered_transcript_and_download(client, database, fake_v
     download = client.get(f'/videos/{job.file_id}/transcript/download')
     assert download.status_code == 200
     assert download.headers['content-type'].startswith('text/plain')
-    assert download.headers['content-disposition'].endswith('.txt"')
-    assert '[00:00:00.500 – 00:00:01.500]\nFirst segment' in download.text
+    assert 'filename="transcript-' in download.headers['content-disposition']
+    assert "filename*=UTF-8''meeting.txt" in download.headers['content-disposition']
+    assert download.text == 'meeting.mp4\n\nFirst segment Second segment\n'
+    assert transcript['paragraphs'] == [[segment['id'] for segment in transcript['segments']]]
     assert repository.claim_next_job() is None
     # Reopening persisted results must not create or rerun a job.
     assert client.get(f'/videos/{job.file_id}/transcript').json() == transcript
@@ -338,3 +340,30 @@ def test_supervised_worker_waits_for_existing_owner_before_recovery(monkeypatch)
     monkeypatch.setattr(worker, 'claim_next_job', lambda: events.append('claim'))
     worker.run_worker(once=True, wait_for_lock=True)
     assert events == ['busy', 'waiting', 'acquired', 'recover', 'claim']
+
+
+def test_readable_download_is_independent_of_original_mp4(client, database, fake_video_tools, monkeypatch):
+    from urllib.parse import quote
+
+    filename = 'Möte – anteckningar.mp4'
+    monkeypatch.setattr(transcription_service, 'transcribe_audio', lambda *args, **kwargs: TranscriptionResult('sv', [
+        TranscriptSegment(0, 1000, 'Hej alla.  '),
+        TranscriptSegment(1000, 2000, ' Välkomna till mötet.\n'),
+        TranscriptSegment(5000, 6000, 'Nästa ämne.'),
+    ]))
+    created = upload(client, b'x' * 10000, filename).json()
+    job = repository.claim_next_job()
+    transcription_service.process_video_job(job)
+    # Simulate future removal of this test's original: the text is self-contained.
+    job.storage_path.unlink()
+    response = client.get(f"/videos/{created['file_id']}/transcript/download")
+    assert response.status_code == 200
+    assert response.text == filename + '\n\nHej alla. Välkomna till mötet.\n\nNästa ämne.\n'
+    assert response.content == response.text.encode('utf-8')
+    assert len(response.content) < 10000
+    assert "filename*=UTF-8''" + quote('Möte – anteckningar.txt', safe='') in response.headers['content-disposition']
+    transcript = client.get(f"/videos/{created['file_id']}/transcript").json()
+    assert len(transcript['paragraphs']) == 2
+    result = client.get('/search', params={'q': 'Välkomna'}).json()['results'][0]
+    assert result['file_id'] == created['file_id']
+    assert result['segment_id'] in transcript['paragraphs'][0]

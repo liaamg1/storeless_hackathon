@@ -4,6 +4,8 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.processors.pdf_processor import InvalidPdfError
 from app.repositories import file_repository
+from app.schemas.storage import StorageSavings
+from app.services.storage_service import StorageFileNotFoundError, get_storage_savings
 from app.schemas.file import DocumentDetails, FileRecord, UploadResult
 from app.services.file_service import (
     InvalidUploadError, UnsupportedFileError, UploadTooLargeError, upload_pdf,
@@ -43,3 +45,14 @@ def get_pages(file_id: int) -> DocumentDetails:
     if document is None:
         raise HTTPException(404, "File not found.")
     return document
+
+
+@router.get("/{file_id}/storage-savings", response_model=StorageSavings)
+def get_file_storage_savings(file_id: int) -> StorageSavings:
+    try:
+        return get_storage_savings(file_id)
+    except StorageFileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        logger.error("storage_comparison_failed error_type=%s", type(exc).__name__)
+        raise HTTPException(500, "Storage comparison is unavailable. Please try again.") from exc

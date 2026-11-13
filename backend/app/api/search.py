@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.search import SearchResponse
-from app.services.search_service import InvalidSearchQuery, search_document_pages
+from app.services.search_service import InvalidSearchQuery, search_content
 
 router = APIRouter(tags=["search"])
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ def search_documents(
     limit: int = Query(20, ge=1, le=100),
 ) -> SearchResponse:
     try:
-        return search_document_pages(q, limit)
+        return search_content(q, limit)
     except InvalidSearchQuery as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:

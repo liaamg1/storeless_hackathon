@@ -9,7 +9,7 @@ import pytest
 from app.processors import audio_extractor, speech_recognizer
 from app.processors.audio_extractor import MediaProcessingError, MediaToolUnavailableError
 from app.schemas.transcription import VideoTranscript
-from app.services.transcript_export import format_timestamp, format_transcript
+from app.services.transcript_export import format_transcript
 
 
 @pytest.mark.parametrize('seconds,expected', [(0, 0), (1.234, 1234), (60.5, 60500)])
@@ -24,12 +24,11 @@ def test_invalid_timestamps(seconds):
 
 
 def test_export_formatting():
-    assert format_timestamp(3661234) == '01:01:01.234'
     transcript = VideoTranscript(file_id=1, filename='meeting.mp4', duration_ms=5000, language='en', segments=[
         {'id': 1, 'start_ms': 1234, 'end_ms': 4567, 'text': 'Hello meeting.'},
     ])
     assert format_transcript(transcript) == (
-        'File: meeting.mp4\nStatus: Completed\n\n[00:00:01.234 – 00:00:04.567]\nHello meeting.\n\n'
+        'meeting.mp4\n\nHello meeting.\n'
     )
 
 
@@ -138,3 +137,45 @@ def test_model_is_reused_and_loading_failure_is_safe(monkeypatch):
     with pytest.raises(speech_recognizer.SpeechRecognitionError, match='Could not load'):
         speech_recognizer.load_model('tiny', 'cpu', 'int8', '/tmp/cache')
     speech_recognizer.load_model.cache_clear()
+
+
+
+def test_readable_paragraphs_preserve_words_and_search_targets():
+    transcript = VideoTranscript(file_id=1, filename='Räksmörgås.mp4', duration_ms=10000, language='sv', segments=[
+        {'id': 1, 'start_ms': 0, 'end_ms': 1000, 'text': '  Some of the most successful\npeople '},
+        {'id': 2, 'start_ms': 1000, 'end_ms': 2000, 'text': " are the ones who've had the most failures.\n\n"},
+        {'id': 3, 'start_ms': 5000, 'end_ms': 6000, 'text': 'Försök igen.'},
+        {'id': 4, 'start_ms': 6000, 'end_ms': 7000, 'text': '  \n '},
+    ])
+    assert transcript.paragraphs == [[1, 2], [3]]
+    assert transcript.model_dump()['paragraphs'] == [[1, 2], [3]]
+    assert format_transcript(transcript) == (
+        "Räksmörgås.mp4\n\nSome of the most successful people are the ones who've had the most failures."
+        "\n\nFörsök igen.\n"
+    )
+    # Formatting never rewrites persisted text or removes timestamp metadata.
+    assert transcript.segments[1].text.endswith('failures.\n\n')
+    assert transcript.segments[2].start_ms == 5000
+
+
+def test_long_continuous_transcript_is_split_into_readable_paragraphs():
+    sentence = 'This sentence should be preserved. '
+    segments = [
+        {'id': index, 'start_ms': index * 1000, 'end_ms': (index + 1) * 1000, 'text': sentence}
+        for index in range(100)
+    ]
+    transcript = VideoTranscript(file_id=1, filename='long.mp4', duration_ms=100000, language='en', segments=segments)
+    assert len(transcript.paragraphs) > 1
+    assert [id for paragraph in transcript.paragraphs for id in paragraph] == list(range(100))
+    output = format_transcript(transcript)
+    assert output.count(sentence.strip()) == 100
+    assert len(output.encode('utf-8')) < 5000
+
+
+@pytest.mark.parametrize('segments', [[], [
+    {'id': 1, 'start_ms': 0, 'end_ms': 1000, 'text': ' \n '},
+]])
+def test_empty_readable_transcript(segments):
+    transcript = VideoTranscript(file_id=1, filename='silent.mp4', duration_ms=1000, language=None, segments=segments)
+    assert transcript.paragraphs == []
+    assert format_transcript(transcript) == 'silent.mp4\n\nNo speech was detected.\n'
