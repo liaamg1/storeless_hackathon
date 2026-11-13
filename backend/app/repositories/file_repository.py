@@ -1,5 +1,6 @@
 """SQL and transaction boundaries for files and their extracted pages."""
 from pathlib import Path
+from psycopg.types.json import Jsonb
 
 from app.core.database import get_connection
 from app.processors.pdf_processor import ExtractedPage
@@ -16,15 +17,16 @@ def list_files() -> list[FileRecord]:
 
 def create_document(
     filename: str, size_bytes: int, sha256: str,
-    storage_path: Path, pages: list[ExtractedPage],
+    storage_path: Path, pages: list[ExtractedPage], *,
+    processing_options: list[str] | None = None, analyze_slides: bool = True,
 ) -> UploadResult:
     """Commit metadata and all pages together, or roll back both on failure."""
     with get_connection() as connection:
         with connection.transaction():
             row = connection.execute(
-                """INSERT INTO files (filename, size_bytes, sha256, storage_path)
-                   VALUES (%s, %s, %s, %s) RETURNING id""",
-                (filename, size_bytes, sha256, str(storage_path)),
+                """INSERT INTO files (filename, size_bytes, sha256, storage_path, processing_options)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                (filename, size_bytes, sha256, str(storage_path), Jsonb(processing_options) if processing_options is not None else None),
             ).fetchone()
             file_id = row["id"]
             with connection.cursor() as cursor:
@@ -33,10 +35,11 @@ def create_document(
                        VALUES (%s, %s, %s)""",
                     [(file_id, page.page_number, page.text) for page in pages],
                 )
-            connection.execute(
-                "INSERT INTO processing_jobs (file_id, job_type) VALUES (%s, 'presentation_analysis')",
-                (file_id,),
-            )
+            if analyze_slides:
+                connection.execute(
+                    "INSERT INTO processing_jobs (file_id, job_type) VALUES (%s, 'presentation_analysis')",
+                    (file_id,),
+                )
     return UploadResult(
         id=file_id, filename=filename, size_bytes=size_bytes, page_count=len(pages)
     )

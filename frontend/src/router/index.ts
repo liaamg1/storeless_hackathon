@@ -7,17 +7,24 @@ import VideoTranscriptionView from "../views/VideoTranscriptionView.vue";
 import FilesView from "../views/FilesView.vue";
 import PdfExtractionView from "../views/PdfExtractionView.vue";
 import DocumentSearchView from "../views/DocumentSearchView.vue";
+import UploadFilesView from "../views/UploadFilesView.vue";
 
 export const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    {
+      path: "/upload",
+      name: "upload",
+      component: UploadFilesView,
+      meta: { title: "Workspace" },
+    },
     {
       path: "/slides",
       name: "slides",
       component: SlideComparisonView,
       meta: { title: "Slide Comparison" },
     },
-    { path: "/", redirect: "/overview" },
+    { path: "/", redirect: "/upload" },
     {
       path: "/overview",
       name: "overview",
@@ -39,7 +46,7 @@ export const router = createRouter({
     {
       path: "/extract",
       name: "extract",
-      meta: { title: "PDF Extraction" },
+      meta: { title: "Document text" },
       component: PdfExtractionView,
     },
     {

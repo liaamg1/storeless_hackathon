@@ -312,3 +312,117 @@ near-match review labels, image reuse, measured positive and negative savings,
 document outline, timestamps, HTML download, and 320px/390px layouts. Existing
 file metadata, extracted page text and transcript fingerprints were unchanged by
 the local Docker update.
+
+## Unified upload and processing
+
+Open **Upload Files** from the sidebar, header, dashboard or a feature page.
+Select or drop multiple PDF, PPTX and MP4 files, review the suggested checkboxes,
+and choose **Start Processing**. The flow has three steps: select files, choose
+processing, and view results. Dedicated extraction/transcription/comparison routes
+remain available for results; their upload entry links lead to this central page.
+Existing backend upload endpoints retain their original behavior.
+
+Supported choices reuse the existing pipelines:
+
+- PDF: extract selectable text and index it for search; optionally analyze pages
+  for slide comparison and check exact file duplicates. OCR is not available.
+- PPTX: extract, compare and index slides; optionally check exact file duplicates.
+- MP4: transcribe and index speech; optionally extract images/create a visual
+  transcript, calculate potential storage savings, and check exact file duplicates.
+
+Text/search and slide extraction/indexing are bundled where the existing pipeline
+makes them inseparable. A base operation is required: PDF text, PPTX slides, or MP4
+transcription. Selecting a dependent operation enables its base; clearing the base
+clears dependent choices. Recommendations do not start work until **Start
+Processing** is clicked. A new transcript-only MP4 does not queue image extraction;
+legacy dedicated MP4 uploads preserve their previous automatic visual workflow.
+
+Current byte limits are fetched from the backend (`MAX_UPLOAD_BYTES` for PDF/PPTX,
+`MAX_VIDEO_UPLOAD_BYTES` for MP4), displayed and checked before upload, and enforced
+again by the existing streaming backend. Each file has one multipart request,
+regardless of the number of selected operations. Batches upload sequentially.
+The hash/limit pass reads fixed 64 KB chunks; identical content with an available
+stored original reuses its file record instead of writing another original.
+The accepted row identifies reused files, which keep their existing filename.
+
+The processing monitor displays persisted selections and actual job states, not
+estimated percentages. PDF text extraction still runs during the existing upload
+request; video and presentation work runs in the existing background worker.
+Duplicate checks use the existing comparison service, and storage is marked ready
+only after measurements are available. Failed steps remain failed while other
+completed results stay accessible. The session upload queue continues when
+navigating within the app; keep the browser tab open until uploads finish.
+Accepted selections and processing results survive a full refresh.
+
+**Files** is the central results workspace. Open a file to see its operation states
+and available text, slides, transcript, visual transcript, duplicate information
+or storage comparison. **View Results** opens this drawer directly. **Choose
+processing for this file** adds operations or retries failed ones using the stored
+original, without another file upload. Existing results and previously authorized
+work are retained; changing the current selection does not cancel earlier jobs.
+
+Selections are stored in a nullable `files.processing_options` JSONB column;
+`processing_jobs` and existing page/transcript tables retain their roles. No new
+database table or dependency is introduced. Existing files are not rewritten.
+Apply the additive, repeatable migration before starting the updated backend:
+
+```sh
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U my -d restore < database/migrations/008_unified_upload.sql
+docker compose up -d --build
+```
+
+Fresh databases include it in `01_schema.sql`. Never reset database volumes.
+
+Coordinator endpoints:
+
+- `GET /uploads/limits`: active byte limits.
+- `POST /uploads`: one multipart file plus an `operations` JSON-array form field.
+- `GET /uploads`: saved central processing selections and real per-operation states.
+- `GET /uploads/{id}`: one file's available processing/results, including legacy files.
+- `POST /uploads/{id}/process`: JSON `{ "operations": [...] }` to process a stored file.
+
+Operation IDs: `pdf_text`, `slides`, `transcribe`, `visuals`, `storage`, `duplicates`.
+Selections are validated against type-specific capabilities and base dependencies.
+Unit and PostgreSQL tests cover these rules, actual PPTX completion, stream bounds,
+content reuse, legacy compatibility, opt-outs, retries, limits, and failure states.
+Frontend checks: `npm --prefix frontend test` and `npm --prefix frontend run build`.
+
+Verified for unified uploads: **253 backend tests passed**, all frontend test files
+passed, and the frontend production build succeeded. Chromium used an isolated QA
+database to upload a mixed PDF/PPTX/MP4 batch, run the existing Whisper,
+LibreOffice and visual workers, verify selected-operation opt-outs, continue uploads
+while navigating, restore statuses after refresh, reuse identical content, add
+processing to a stored file without another upload, open all results from Files,
+and check 320px/390px layouts. The local additive migration preserved existing file
+metadata, extracted page text and speech-transcript fingerprints. No QA uploads
+were added to the application database.
+
+### Automatic analysis and storage action plan
+
+The central upload UI now runs **all supported operations automatically** after
+**Upload & Analyze**. There are no processing checkboxes. Stored-file reanalysis
+also includes every supported check and reuses completed work. The earlier
+per-operation API remains compatible for integrations.
+
+The action overview prioritizes exact duplicate cleanup, measured video size
+comparisons, presentation consolidation reviews, failed-analysis retries and
+retention of unique content. Video optimization and workspace duplicate savings
+are displayed separately; video copies already suggested for duplicate removal
+are excluded from the optimization total. Slide visual scores are never converted
+into estimated byte savings. Processing details remain available in a collapsed
+section. Recommendations do not delete original files.
+
+The upload workspace now separates **Add files**, **Review recommendations**, and
+**Activity** into focused views. Completed batches switch to recommendations.
+Review cards use one primary action, filters, prominent measured savings and
+collapsed evidence. Repeated duplicate-copy cards are grouped, and activity
+retains the detailed processing states without repeating them in the review view.
+
+The primary sidebar is now **Workspace**, **All files**, and **Search**. Specialist
+result views are grouped under **More tools**. The workspace is the landing page,
+opens on recommendations, and exposes a prominent **Add files** action. Header
+upload buttons open that same workspace's upload view. Presentation slides and
+recording visuals retain their own result types; **Document text** names the PDF
+text view. Existing backend processing and direct result routes remain compatible.
+The sidebar navigation scrolls independently, including on short mobile screens,
+while branding and sidebar controls remain reachable.

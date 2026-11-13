@@ -20,24 +20,20 @@ const groups = [
   {
     label: "Workspace",
     items: [
-      { name: "overview", label: "Overview", icon: LayoutDashboard },
-      { name: "files", label: "Files", icon: Folder },
+      { name: "upload", label: "Workspace", icon: Layers3 },
+      { name: "files", label: "All files", icon: Folder },
       { name: "search", label: "Search", icon: Search },
-      { name: "duplicates", label: "Duplicates", icon: Copy },
-      { name: "slides", label: "Slide Comparison", icon: Presentation },
     ],
   },
   {
-    label: "Processing",
+    label: "More tools",
     items: [
-      { name: "extract", label: "PDF Extraction", icon: FileText },
-      { name: "transcription", label: "Video Transcription", icon: Video },
-    ],
-  },
-  {
-    label: "Analytics",
-    items: [
-      { name: "storage", label: "Storage Savings", icon: ChartNoAxesColumn },
+      { name: "overview", label: "Dashboard", icon: LayoutDashboard },
+      { name: "slides", label: "Presentation slides", icon: Presentation },
+      { name: "duplicates", label: "Duplicate files", icon: Copy },
+      { name: "extract", label: "Document text", icon: FileText },
+      { name: "transcription", label: "Recording documents", icon: Video },
+      { name: "storage", label: "Storage details", icon: ChartNoAxesColumn },
     ],
   },
 ];
@@ -45,9 +41,9 @@ const groups = [
 <template>
   <div class="sidebar-content" :class="{ collapsed }">
     <RouterLink
-      :to="{ name: 'overview' }"
+      :to="{ name: 'upload', query: { tab: 'review' } }"
       class="brand"
-      aria-label="ReStore overview"
+      aria-label="ReStore workspace"
       @click="$emit('navigate')"
       ><span class="brand-mark"><Layers3 :size="23" /></span
       ><span v-if="!collapsed"
@@ -60,12 +56,33 @@ const groups = [
       <ChevronRight :size="14" />
     </div>
     <nav aria-label="Main navigation">
-      <div v-for="group in groups" :key="group.label" class="nav-group">
-        <p v-if="!collapsed" class="nav-group-label">{{ group.label }}</p>
+      <component
+        :is="group.label === 'More tools' ? 'details' : 'div'"
+        v-for="group in groups"
+        :key="group.label"
+        class="nav-group"
+        :open="collapsed || undefined"
+      >
+        <summary
+          v-if="group.label === 'More tools'"
+          :aria-label="collapsed ? 'More tools' : undefined"
+        >
+          {{ collapsed ? "•••" : "More tools" }}
+        </summary>
+        <p
+          v-if="!collapsed && group.label !== 'More tools'"
+          class="nav-group-label"
+        >
+          {{ group.label }}
+        </p>
         <RouterLink
           v-for="item in group.items"
           :key="item.name"
-          :to="{ name: item.name }"
+          :to="
+            item.name === 'upload'
+              ? { name: 'upload', query: { tab: 'review' } }
+              : { name: item.name }
+          "
           class="nav-link"
           :title="collapsed ? item.label : undefined"
           :aria-label="collapsed ? item.label : undefined"
@@ -76,7 +93,7 @@ const groups = [
             >{{ item.label }}</span
           >
         </RouterLink>
-      </div>
+      </component>
     </nav>
     <div class="sidebar-bottom">
       <div v-if="!collapsed" class="sidebar-project">
@@ -97,3 +114,30 @@ const groups = [
     </div>
   </div>
 </template>
+
+<style scoped>
+.sidebar-content {
+  min-height: 0;
+  overflow: hidden;
+}
+.sidebar-content > .brand,
+.workspace-label,
+.sidebar-bottom {
+  flex-shrink: 0;
+}
+nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #53677f transparent;
+  padding-bottom: 12px;
+}
+summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #aab8ce;
+}
+</style>

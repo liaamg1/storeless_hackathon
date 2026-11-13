@@ -18,8 +18,7 @@ import FilesTable from "../components/files/FilesTable.vue";
 import FileDetailsDrawer from "../components/files/FileDetailsDrawer.vue";
 import StatusBadge from "../components/shared/StatusBadge.vue";
 import EmptyState from "../components/shared/EmptyState.vue";
-const { files, recordings, loading, error, statusError, refresh } =
-  useWorkspace();
+const { files, loading, error, statusError, refresh } = useWorkspace();
 const duplicateSavings = ref<number | null>(null);
 const savingsLoading = ref(true);
 const selectedId = ref<number | null>(null);
@@ -30,7 +29,12 @@ const recent = computed(() =>
   filterFiles(files.value, "", "all", "all", "newest").slice(0, 6),
 );
 const processing = computed(() =>
-  [...recordings.value].sort((a, b) => b.file_id - a.file_id).slice(0, 5),
+  files.value
+    .filter(
+      (file) => file.processing || file.video || file.presentation?.job_id,
+    )
+    .sort((a, b) => b.id - a.id)
+    .slice(0, 5),
 );
 const pdfCount = computed(
   () => files.value.filter((file) => file.type === "pdf").length,
@@ -70,22 +74,25 @@ onBeforeUnmount(() => {
       <div>
         Total Files<span class="kpi-icon"><Folder :size="17" /></span>
       </div>
-      <strong>{{ loading || error ? "—" : files.length }}</strong
-      ><small>Across your workspace</small>
+      <strong>{{ loading || error ? "—" : files.length }}</strong><small
+        >Across your workspace</small
+      >
     </div>
     <div class="kpi-card">
       <div>
         PDF Documents<span class="kpi-icon"><FileText :size="17" /></span>
       </div>
-      <strong>{{ loading || error ? "—" : pdfCount }}</strong
-      ><small>Documents available for extraction</small>
+      <strong>{{ loading || error ? "—" : pdfCount }}</strong><small
+        >Documents available for extraction</small
+      >
     </div>
     <div class="kpi-card">
       <div>
         Video Recordings<span class="kpi-icon"><Video :size="17" /></span>
       </div>
-      <strong>{{ loading || error ? "—" : videoCount }}</strong
-      ><small>Uploaded MP4 recordings</small>
+      <strong>{{ loading || error ? "—" : videoCount }}</strong><small
+        >Uploaded MP4 recordings</small
+      >
     </div>
     <div class="kpi-card">
       <div>
@@ -97,8 +104,7 @@ onBeforeUnmount(() => {
           : duplicateSavings === null
             ? "Unavailable"
             : formatBytes(duplicateSavings)
-      }}</strong
-      ><small>Exact duplicate copies · originals retained</small>
+      }}</strong><small>Exact duplicate copies · originals retained</small>
     </div>
   </div>
   <div class="overview-callout">
@@ -109,8 +115,8 @@ onBeforeUnmount(() => {
         Compare your recordings with their compact, searchable text versions.
       </p>
     </div>
-    <RouterLink :to="{ name: 'storage' }"
-      >Explore storage savings <ArrowUpRight :size="14"
+    <RouterLink :to="{ name: 'upload' }"
+      >Upload Files <ArrowUpRight :size="14"
     /></RouterLink>
   </div>
   <div class="dashboard-columns">
@@ -137,10 +143,10 @@ onBeforeUnmount(() => {
     <section>
       <header class="panel-heading">
         <h2>Recent processing</h2>
-        <span class="count-chip">Recordings</span>
+        <span class="count-chip">All file types</span>
       </header>
       <p class="muted" style="font-size: 12px">
-        Latest recording jobs and their current status.
+        Latest document and recording jobs and their current status.
       </p>
       <p v-if="loading" role="status">Loading jobs…</p>
       <p v-else-if="statusError" class="notice" role="status">
@@ -148,26 +154,31 @@ onBeforeUnmount(() => {
       </p>
       <EmptyState
         v-else-if="!processing.length"
-        title="No recording jobs yet"
-        description="Upload an MP4 to start a transcription job."
+        title="No processing jobs yet"
+        description="Open Upload Files to choose processing for documents or recordings."
       />
       <div
         v-for="recording in processing"
         v-else
-        :key="recording.file_id"
+        :key="recording.id"
         class="processing-item"
       >
-        <span class="file-type-icon video"><Video :size="17" /></span>
+        <span class="file-type-icon" :class="recording.type"
+          ><component
+            :is="recording.type === 'video' ? Video : FileText"
+            :size="17"
+        /></span>
         <div>
           <RouterLink
             class="truncate"
             :title="recording.filename"
             :to="{
-              name: 'transcription',
-              query: { file: String(recording.file_id) },
+              name: 'files',
+              query: { file: String(recording.id) },
             }"
-            >{{ recording.filename }}</RouterLink
-          ><small>{{ formatDate(recording.uploaded_at) }}</small
+            >{{ recording.filename }}</RouterLink><small>{{
+            formatDate(recording.uploaded_at)
+          }}</small
           ><StatusBadge :status="recording.status" />
         </div>
         <ArrowUpRight :size="15" class="muted" />

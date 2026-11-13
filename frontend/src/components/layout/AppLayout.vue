@@ -1,15 +1,11 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter, RouterView } from "vue-router";
-import { CheckCircle2, X } from "@lucide/vue";
 import AppSidebar from "./AppSidebar.vue";
 import AppHeader from "./AppHeader.vue";
-import FileUpload from "../files/FileUpload.vue";
 const route = useRoute();
 const router = useRouter();
 const collapsed = ref(false);
-const uploadOpen = ref(false);
-const uploadNotice = ref("");
 const mobileNav = ref<HTMLDialogElement | null>(null);
 function shortcut(event: KeyboardEvent): void {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -53,7 +49,10 @@ onBeforeUnmount(() => {
       <AppSidebar :collapsed="collapsed" @toggle="collapsed = !collapsed" />
     </aside>
     <div class="app-main">
-      <AppHeader @menu="mobileNav?.showModal()" @upload="uploadOpen = true" />
+      <AppHeader
+        @menu="mobileNav?.showModal()"
+        @upload="router.push({ name: 'upload', query: { tab: 'upload' } })"
+      />
       <main id="main-content" tabindex="-1" class="page-content">
         <RouterView />
       </main>
@@ -81,19 +80,4 @@ onBeforeUnmount(() => {
       Close navigation
     </button>
   </dialog>
-  <FileUpload
-    v-if="uploadOpen"
-    @close="uploadOpen = false"
-    @uploaded="uploadNotice = $event"
-  />
-  <div v-if="uploadNotice" class="upload-toast" role="status">
-    <CheckCircle2 :size="19" /><span>{{ uploadNotice }}</span
-    ><button
-      class="icon-button"
-      aria-label="Dismiss upload notification"
-      @click="uploadNotice = ''"
-    >
-      <X :size="16" />
-    </button>
-  </div>
 </template>

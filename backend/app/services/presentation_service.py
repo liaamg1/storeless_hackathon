@@ -40,7 +40,7 @@ def analyze_presentation(file_id: int) -> PresentationRecord:
     return repository.queue_existing(file_id)
 
 
-def upload_presentation(source: BinaryIO, original_filename: str | None) -> PresentationRecord:
+def upload_presentation(source: BinaryIO, original_filename: str | None, *, processing_options: list[str] | None = None) -> PresentationRecord:
     settings = get_settings()
     filename = (original_filename or '').replace('\\', '/').rsplit('/', 1)[-1]
     suffix = Path(filename).suffix.lower()
@@ -59,7 +59,9 @@ def upload_presentation(source: BinaryIO, original_filename: str | None) -> Pres
             with target.open('rb') as pdf:
                 if not pdf.read(1024).lstrip().startswith(b'%PDF-'):
                     raise UnsupportedFileError('The file contents are not PDF format.')
-        return repository.create_presentation(filename, size, digest, target)
+        return repository.create_presentation(
+            filename, size, digest, target, processing_options=processing_options,
+        )
     except Exception:
         if owns_file:
             target.unlink(missing_ok=True)

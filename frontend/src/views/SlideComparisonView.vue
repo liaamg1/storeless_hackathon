@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch, onBeforeUnmount } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { RefreshCw, Presentation, Upload } from "@lucide/vue";
+import { RefreshCw } from "@lucide/vue";
 import { usePresentations } from "../composables/usePresentations";
 import type { SlideClassification } from "../types/presentation";
 import SlideComparisonCard from "../components/presentations/SlideComparisonCard.vue";
 import PresentationRecommendations from "../components/presentations/PresentationRecommendations.vue";
 import EmptyState from "../components/shared/EmptyState.vue";
+import UploadEntry from "../components/uploads/UploadEntry.vue";
 const route = useRoute(),
   router = useRouter();
 const {
@@ -15,16 +16,13 @@ const {
   selected,
   comparison,
   loading,
-  uploading,
   error,
   listError,
   refreshList,
   select,
   analyze,
-  upload,
 } = usePresentations();
-const file = ref<File | null>(null),
-  filter = ref<SlideClassification | "all">("all"),
+const filter = ref<SlideClassification | "all">("all"),
   page = ref(1);
 const filterOptions = [
   { value: "all", label: "All Results" },
@@ -32,9 +30,6 @@ const filterOptions = [
   { value: "similar", label: "Similar Slides" },
   { value: "unique", label: "Unique Slides" },
 ] as const;
-const supported = computed(
-  () => !!file.value && /\.(pdf|pptx)$/i.test(file.value.name),
-);
 const recordsAnalyzed = computed(() =>
   presentations.value.filter((p) => p.status === "completed"),
 );
@@ -54,10 +49,6 @@ const visible = computed(() =>
 const pageCount = computed(() =>
   Math.max(1, Math.ceil(filtered.value.length / 6)),
 );
-let active = true;
-onBeforeUnmount(() => {
-  active = false;
-});
 watch(
   () => route.query.file,
   (value) => {
@@ -72,15 +63,6 @@ watch([filter, () => comparison.value], () => {
 function choose(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
   void router.push({ name: "slides", query: { file: value || undefined } });
-}
-async function uploadAndOpen(): Promise<void> {
-  if (!file.value || !supported.value) return;
-  const result = await upload(file.value);
-  if (result && active)
-    void router.push({
-      name: "slides",
-      query: { file: String(result.file_id) },
-    });
 }
 function refresh(): void {
   void refreshList();
@@ -98,31 +80,9 @@ function refresh(): void {
       <RefreshCw :size="16" />Refresh results
     </button>
   </div>
-  <section class="feature-upload">
-    <h2><Presentation :size="18" /> Analyze a presentation</h2>
-    <p>
-      PDF and PPTX · Rendered locally in the background · Originals retained
-    </p>
-    <form @submit.prevent="uploadAndOpen">
-      <label for="presentation-upload">Choose presentation</label
-      ><input
-        id="presentation-upload"
-        type="file"
-        accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        :disabled="uploading"
-        @change="file = ($event.target as HTMLInputElement).files?.[0] ?? null"
-      /><button class="button-primary" :disabled="!supported || uploading">
-        <Upload :size="15" />{{ uploading ? "Uploading…" : "Upload & Analyze" }}
-      </button>
-    </form>
-    <p v-if="file && !supported" class="error" role="alert">
-      Choose a PDF or PPTX presentation.
-    </p>
-    <p v-if="uploading" role="status">
-      Uploading presentation. Rendering and comparison continue in the
-      background.
-    </p>
-  </section>
+  <UploadEntry
+    description="Add PDF or PPTX presentations and choose slide extraction and comparison from one central upload page."
+  />
   <p v-if="listError" class="notice error" role="alert">{{ listError }}</p>
   <p v-if="error" class="notice error" role="alert">{{ error }}</p>
   <section>

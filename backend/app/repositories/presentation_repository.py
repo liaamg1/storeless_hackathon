@@ -1,6 +1,7 @@
 """Presentation jobs and slide artifacts reuse files, processing_jobs and document_pages."""
 from dataclasses import dataclass
 from pathlib import Path
+from psycopg.types.json import Jsonb
 
 from app.core.database import get_connection
 from app.processors.presentation_processor import ExtractedSlide
@@ -44,13 +45,13 @@ def queue_existing(file_id: int) -> PresentationRecord:
     return PresentationRecord(**get_source(file_id))
 
 
-def create_presentation(filename: str, size_bytes: int, sha256: str, path: Path) -> PresentationRecord:
+def create_presentation(filename: str, size_bytes: int, sha256: str, path: Path, *, processing_options: list[str] | None = None) -> PresentationRecord:
     with get_connection() as connection:
         with connection.transaction():
             file = connection.execute(
-                """INSERT INTO files (filename, size_bytes, sha256, storage_path, file_type)
-                   VALUES (%s,%s,%s,%s,%s) RETURNING id, uploaded_at""",
-                (filename, size_bytes, sha256, str(path), path.suffix[1:]),
+                """INSERT INTO files (filename, size_bytes, sha256, storage_path, file_type, processing_options)
+                   VALUES (%s,%s,%s,%s,%s,%s) RETURNING id, uploaded_at""",
+                (filename, size_bytes, sha256, str(path), path.suffix[1:], Jsonb(processing_options) if processing_options is not None else None),
             ).fetchone()
             file_id = file['id']
             job = connection.execute("INSERT INTO processing_jobs (file_id, job_type) VALUES (%s,'presentation_analysis') RETURNING id", (file_id,)).fetchone()

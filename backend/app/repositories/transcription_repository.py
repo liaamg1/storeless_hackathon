@@ -1,6 +1,7 @@
 """PostgreSQL job queue, video metadata, and atomic transcript persistence."""
 from dataclasses import dataclass
 from pathlib import Path
+from psycopg.types.json import Jsonb
 
 from app.core.database import get_connection
 from app.processors.speech_recognizer import TranscriptionResult
@@ -15,14 +16,14 @@ class ClaimedVideoJob:
 
 
 def create_video_job(filename: str, size_bytes: int, sha256: str,
-                     storage_path: Path, duration_ms: int) -> VideoUploadResult:
+                     storage_path: Path, duration_ms: int, *, processing_options: list[str] | None = None) -> VideoUploadResult:
     """Commit the original's metadata and queued job together, or neither."""
     with get_connection() as connection:
         with connection.transaction():
             file_id = connection.execute(
-                """INSERT INTO files (filename, size_bytes, sha256, storage_path, file_type, duration_ms)
-                   VALUES (%s, %s, %s, %s, 'video', %s) RETURNING id""",
-                (filename, size_bytes, sha256, str(storage_path), duration_ms),
+                """INSERT INTO files (filename, size_bytes, sha256, storage_path, file_type, duration_ms, processing_options)
+                   VALUES (%s, %s, %s, %s, 'video', %s, %s) RETURNING id""",
+                (filename, size_bytes, sha256, str(storage_path), duration_ms, Jsonb(processing_options) if processing_options is not None else None),
             ).fetchone()["id"]
             job_id = connection.execute(
                 """INSERT INTO processing_jobs (file_id, job_type)
@@ -136,7 +137,9 @@ def complete_transcription(job: ClaimedVideoJob, result: TranscriptionResult) ->
                    error_message = NULL, completed_at = NOW() WHERE id = %s""", (job.job_id,),
             )
             connection.execute(
-                """INSERT INTO processing_jobs (file_id, job_type) VALUES (%s, 'video_visuals')
+                """INSERT INTO processing_jobs (file_id, job_type)
+                   SELECT id, 'video_visuals' FROM files WHERE id=%s
+                   AND (processing_options IS NULL OR processing_options ? 'visuals')
                    ON CONFLICT (file_id, job_type) DO NOTHING""", (job.file_id,),
             )
 

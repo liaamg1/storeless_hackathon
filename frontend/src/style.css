@@ -1491,7 +1491,7 @@ pre {
   }
   .mobile-navigation .sidebar-content {
     height: calc(100% - 48px);
-    min-height: 610px;
+    min-height: 0;
   }
   .mobile-nav-close {
     display: block;

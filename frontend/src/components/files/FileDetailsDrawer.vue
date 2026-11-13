@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
   X,
@@ -15,15 +15,32 @@ import { fileDestination, formatDate } from "../../utils/files";
 import { formatBytes } from "../../utils/formatBytes";
 import { getDocumentPages } from "../../services/api";
 import StatusBadge from "../shared/StatusBadge.vue";
+import ProcessingFileCard from "../uploads/ProcessingFileCard.vue";
+import { getFileProcessing } from "../../services/uploads";
+import type { ProcessingFile } from "../../types/upload";
 const props = defineProps<{ file: WorkspaceFile }>();
 const emit = defineEmits<{ close: [] }>();
 const router = useRouter();
 const dialog = ref<HTMLDialogElement | null>(null);
 const copyMessage = ref("");
 const pdfStatus = ref("");
+const processing = ref<ProcessingFile | null>(props.file.processing ?? null);
+watch(
+  () => props.file.processing,
+  (value) => {
+    if (value) processing.value = value;
+  },
+);
 let active = true;
 onMounted(async () => {
   dialog.value?.showModal();
+  if (props.file.type !== "other") {
+    void getFileProcessing(props.file.id)
+      .then((result) => {
+        if (active) processing.value = result;
+      })
+      .catch(() => {});
+  }
   if (props.file.type === "pdf") {
     pdfStatus.value = "Checking extraction…";
     try {
@@ -68,6 +85,10 @@ function openSlides(): void {
 }
 function openStorage(): void {
   void router.push({ name: "storage", query: { file: String(props.file.id) } });
+  emit("close");
+}
+function chooseProcessing(): void {
+  void router.push({ name: "upload", query: { file: String(props.file.id) } });
   emit("close");
 }
 </script>
@@ -144,7 +165,35 @@ function openStorage(): void {
       <code class="full-hash">{{ file.sha256 }}</code>
       <p v-if="copyMessage" class="muted" role="status">{{ copyMessage }}</p>
     </div>
-    <div class="drawer-block">
+    <ProcessingFileCard
+      v-if="processing?.steps.length"
+      :file="processing"
+      detail
+    />
+    <div v-if="processing?.steps.length" class="drawer-actions">
+      <button
+        v-if="file.type === 'pdf' && !processing.operations.includes('slides')"
+        @click="openSlides"
+      >
+        <FileText :size="16" />Compare slides
+      </button>
+      <button
+        v-if="
+          file.type === 'video' && !processing.operations.includes('storage')
+        "
+        @click="openStorage"
+      >
+        <ChartNoAxesColumn :size="16" />View storage comparison
+      </button>
+    </div>
+    <button
+      v-if="file.type !== 'other'"
+      class="button-primary"
+      @click="chooseProcessing"
+    >
+      Analyze this file
+    </button>
+    <div v-if="!processing?.steps.length" class="drawer-block">
       <h3>Available results</h3>
       <div class="drawer-actions">
         <button class="button-primary" @click="openResult">

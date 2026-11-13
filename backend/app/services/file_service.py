@@ -25,7 +25,7 @@ class UploadTooLargeError(ValueError):
     pass
 
 
-def save_uploaded_file(source: BinaryIO, target: BinaryIO, limit: int) -> tuple[int, str]:
+def save_uploaded_file(source: BinaryIO, target: BinaryIO | None, limit: int) -> tuple[int, str]:
     """Copy buffered bytes while enforcing the limit and hashing actual content."""
     size_bytes = 0
     digest = hashlib.sha256()
@@ -34,13 +34,14 @@ def save_uploaded_file(source: BinaryIO, target: BinaryIO, limit: int) -> tuple[
         if size_bytes > limit:
             raise UploadTooLargeError(f"File exceeds the {limit:,}-byte upload limit.")
         digest.update(chunk)
-        target.write(chunk)
+        if target is not None:
+            target.write(chunk)
     if size_bytes == 0:
         raise InvalidUploadError("The uploaded file is empty.")
     return size_bytes, digest.hexdigest()
 
 
-def upload_pdf(source: BinaryIO, original_filename: str | None) -> UploadResult:
+def upload_pdf(source: BinaryIO, original_filename: str | None, *, processing_options: list[str] | None = None) -> UploadResult:
     """Store a PDF and its pages, removing this upload if any step fails."""
     settings = get_settings()
     upload_id = uuid4().hex
@@ -65,7 +66,11 @@ def upload_pdf(source: BinaryIO, original_filename: str | None) -> UploadResult:
         logger.info("extraction_started upload_id=%s", upload_id)
         pages = extract_pdf_pages(destination)
         logger.info("extraction_completed upload_id=%s page_count=%s", upload_id, len(pages))
-        result = create_document(filename, size_bytes, sha256, destination, pages)
+        result = create_document(
+            filename, size_bytes, sha256, destination, pages,
+            processing_options=processing_options,
+            analyze_slides=processing_options is None or 'slides' in processing_options,
+        )
         logger.info("persistence_completed upload_id=%s file_id=%s", upload_id, result.id)
         return result
     except Exception as exc:

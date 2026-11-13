@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, onBeforeUnmount } from "vue";
+import { useRoute } from "vue-router";
 import { RefreshCw, ChevronLeft, ChevronRight, Folder } from "@lucide/vue";
 import FilesTable from "../components/files/FilesTable.vue";
 import FileFilters from "../components/files/FileFilters.vue";
@@ -9,6 +10,7 @@ import { useWorkspace } from "../composables/useWorkspace";
 import { filterFiles, type FileSort } from "../utils/files";
 import { formatBytes } from "../utils/formatBytes";
 const { files, loading, error, statusError, refresh } = useWorkspace();
+const route = useRoute();
 const query = ref("");
 const type = ref("all");
 const status = ref("all");
@@ -16,6 +18,25 @@ const sort = ref<FileSort>("newest");
 const page = ref(1);
 const pageSize = 12;
 const selectedId = ref<number | null>(null);
+watch(
+  () => route.query.file,
+  (value) => {
+    const id = typeof value === "string" ? Number(value) : 0;
+    selectedId.value = Number.isSafeInteger(id) && id > 0 ? id : null;
+  },
+  { immediate: true },
+);
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+watch(files, (records) => {
+  clearTimeout(refreshTimer);
+  if (
+    records.some(
+      (file) => file.status === "queued" || file.status === "processing",
+    )
+  )
+    refreshTimer = setTimeout(() => void refresh(), 3000);
+});
+onBeforeUnmount(() => clearTimeout(refreshTimer));
 const selectedFile = computed(() =>
   files.value.find((file) => file.id === selectedId.value),
 );

@@ -15,7 +15,7 @@ from app.services.file_service import UnsupportedFileError, save_uploaded_file
 logger = logging.getLogger(__name__)
 
 
-def upload_video(source: BinaryIO, original_filename: str | None) -> VideoUploadResult:
+def upload_video(source: BinaryIO, original_filename: str | None, *, processing_options: list[str] | None = None) -> VideoUploadResult:
     """Stream/hash an MP4, validate real media, then commit metadata and a queued job."""
     settings = get_settings()
     video_settings = get_transcription_settings()
@@ -33,7 +33,10 @@ def upload_video(source: BinaryIO, original_filename: str | None) -> VideoUpload
             size_bytes, sha256 = save_uploaded_file(source, target, video_settings.max_video_bytes)
         metadata = validate_video(destination, video_settings.ffprobe)
         logger.info("video_validated upload_id=%s size_bytes=%s duration_ms=%s", upload_id, size_bytes, metadata.duration_ms)
-        result = repository.create_video_job(filename, size_bytes, sha256, destination, metadata.duration_ms)
+        result = repository.create_video_job(
+            filename, size_bytes, sha256, destination, metadata.duration_ms,
+            processing_options=processing_options,
+        )
         logger.info("video_queued file_id=%s job_id=%s", result.file_id, result.job_id)
         return result
     except Exception as exc:

@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getFiles } from "../services/api";
 import { listPresentations } from "../services/presentations";
 import type { PresentationRecord } from "../types/presentation";
@@ -6,12 +6,16 @@ import { getVideos } from "../services/transcription";
 import type { FileRecord } from "../types/file";
 import type { VideoRecord } from "../types/transcription";
 import { mergeFiles } from "../utils/files";
+import { getProcessingFiles } from "../services/uploads";
+import type { ProcessingFile } from "../types/upload";
+import { useUnifiedUpload } from "./useUnifiedUpload";
 
 /** File metadata and video statuses come from their existing, independent APIs. */
 export function useWorkspace() {
   const rawFiles = ref<FileRecord[]>([]);
   const recordings = ref<VideoRecord[]>([]);
   const presentations = ref<PresentationRecord[]>([]);
+  const processingFiles = ref<ProcessingFile[]>([]);
   const loading = ref(true);
   const error = ref("");
   const statusError = ref("");
@@ -21,10 +25,11 @@ export function useWorkspace() {
     loading.value = true;
     error.value = "";
     statusError.value = "";
-    const [files, videos, slides] = await Promise.allSettled([
+    const [files, videos, slides, processing] = await Promise.allSettled([
       getFiles(),
       getVideos(),
       listPresentations(),
+      getProcessingFiles(),
     ]);
     if (current !== version) return;
     if (files.status === "fulfilled") rawFiles.value = files.value;
@@ -42,12 +47,24 @@ export function useWorkspace() {
         "Recording statuses are unavailable. You can still browse your files.";
     }
     presentations.value = slides.status === "fulfilled" ? slides.value : [];
+    processingFiles.value =
+      processing.status === "fulfilled" ? processing.value : [];
+    if (processing.status === "rejected")
+      statusError.value =
+        "Unified processing statuses are unavailable. Other file details remain accessible.";
     loading.value = false;
   }
   const files = computed(() =>
-    mergeFiles(rawFiles.value, recordings.value, presentations.value),
+    mergeFiles(
+      rawFiles.value,
+      recordings.value,
+      presentations.value,
+      processingFiles.value,
+    ),
   );
   onMounted(refresh);
+  const { history: uploadHistory } = useUnifiedUpload();
+  watch(uploadHistory, () => void refresh());
   onBeforeUnmount(() => {
     version += 1;
   });

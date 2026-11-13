@@ -1,6 +1,7 @@
 import type { PresentationRecord } from "../types/presentation";
 import type { FileRecord } from "../types/file";
 import type { VideoRecord, JobStatus } from "../types/transcription";
+import type { ProcessingFile } from "../types/upload";
 
 export type FileStatus = JobStatus | "available" | "unknown";
 export interface WorkspaceFile extends FileRecord {
@@ -8,6 +9,7 @@ export interface WorkspaceFile extends FileRecord {
   status: FileStatus;
   video?: VideoRecord;
   presentation?: PresentationRecord;
+  processing?: ProcessingFile;
 }
 export type FileSort =
   "newest" | "oldest" | "name" | "name-desc" | "size" | "size-asc";
@@ -25,9 +27,13 @@ export function mergeFiles(
   files: FileRecord[],
   recordings: VideoRecord[],
   presentations: PresentationRecord[] = [],
+  processingFiles: ProcessingFile[] = [],
 ): WorkspaceFile[] {
   const videos = new Map(recordings.map((video) => [video.file_id, video]));
   const analyzed = new Map(presentations.map((p) => [p.file_id, p]));
+  const processing = new Map(
+    processingFiles.map((file) => [file.file_id, file]),
+  );
   return files.map((file) => {
     const type = fileType(file.filename);
     const video = videos.get(file.id);
@@ -37,7 +43,9 @@ export function mergeFiles(
       type,
       video,
       presentation,
+      processing: processing.get(file.id),
       status:
+        processing.get(file.id)?.status ??
         video?.status ??
         (presentation && presentation.status !== "not_processed"
           ? presentation.status

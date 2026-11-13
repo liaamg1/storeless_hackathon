@@ -8,17 +8,37 @@ import DuplicateGroup from "../components/duplicates/DuplicateGroup.vue";
 import RecommendationPanel from "../components/shared/RecommendationPanel.vue";
 import { fetchDuplicateGroups } from "../services/duplicates";
 import type { DuplicateResponse } from "../types/duplicate";
+import { useRoute } from "vue-router";
 
 const response = ref<DuplicateResponse | null>(null);
+const route = useRoute();
 const loading = ref(true);
 const error = ref("");
 const orderedGroups = computed(() =>
-  [...(response.value?.groups ?? [])].sort(
-    (a, b) =>
-      b.potential_savings_bytes - a.potential_savings_bytes ||
-      a.sha256.localeCompare(b.sha256),
-  ),
+  [...(response.value?.groups ?? [])]
+    .filter(
+      (group) =>
+        !route.query.file ||
+        group.files.some((file) => String(file.id) === route.query.file),
+    )
+    .sort(
+      (a, b) =>
+        b.potential_savings_bytes - a.potential_savings_bytes ||
+        a.sha256.localeCompare(b.sha256),
+    ),
 );
+
+const visibleSummary = computed(() => ({
+  duplicate_groups: orderedGroups.value.length,
+  redundant_copies: orderedGroups.value.reduce(
+    (sum, group) => sum + group.file_count - 1,
+    0,
+  ),
+  potential_savings_bytes: orderedGroups.value.reduce(
+    (sum, group) => sum + group.potential_savings_bytes,
+    0,
+  ),
+}));
 
 async function scanForDuplicates(): Promise<void> {
   loading.value = true;
@@ -70,16 +90,22 @@ onMounted(scanForDuplicates);
       <RouterLink :to="{ name: 'slides' }">Open Slide Comparison</RouterLink>
     </p>
     <template v-if="response">
-      <DuplicateSummary :summary="response.summary" />
+      <p v-if="route.query.file" class="notice">
+        Showing duplicate groups containing File #{{ route.query.file }}.
+        <RouterLink :to="{ name: 'duplicates' }"
+          >Show all duplicates</RouterLink
+        >
+      </p>
+      <DuplicateSummary :summary="visibleSummary" />
       <RecommendationPanel
-        v-if="response.groups.length"
+        v-if="orderedGroups.length"
         title="Suggested cleanup"
         description="Start with the largest storage opportunities. Each group names one suggested copy to keep and the identical copies you can consider deleting."
       >
         <div class="recommendation-item">
           <span class="recommendation-badge exact">Exact file matches</span>
           <h3>
-            {{ response.summary.redundant_copies }} redundant copies to review
+            {{ visibleSummary.redundant_copies }} redundant copies to review
           </h3>
           <p>
             Keep one copy per group. Suggested deletions are based on matching
@@ -89,9 +115,17 @@ onMounted(scanForDuplicates);
         </div>
       </RecommendationPanel>
       <EmptyState
-        v-if="response.groups.length === 0"
-        title="No duplicates found"
-        description="All stored files have distinct content and size combinations."
+        v-if="orderedGroups.length === 0"
+        :title="
+          route.query.file
+            ? 'No duplicates found for this file'
+            : 'No duplicates found'
+        "
+        :description="
+          route.query.file
+            ? 'This file is not part of a stored exact-duplicate group.'
+            : 'All stored files have distinct content and size combinations.'
+        "
       />
       <DuplicateGroup
         v-for="(group, index) in orderedGroups"

@@ -10,9 +10,9 @@ import { formatDate } from "../utils/files";
 import { formatTimestamp } from "../utils/formatTimestamp";
 import StatusBadge from "../components/shared/StatusBadge.vue";
 import EmptyState from "../components/shared/EmptyState.vue";
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import VideoUpload from "../components/transcription/VideoUpload.vue";
+import UploadEntry from "../components/uploads/UploadEntry.vue";
 import TranscriptionProgress from "../components/transcription/TranscriptionProgress.vue";
 import StorageSavings from "../components/storage/StorageSavings.vue";
 import TranscriptViewer from "../components/transcription/TranscriptViewer.vue";
@@ -27,9 +27,6 @@ const {
   loadingRecordings,
   recordingsError,
   loadRecordings,
-  uploading,
-  uploadError,
-  uploadRecording,
   selectedVideo,
   job,
   transcript,
@@ -72,16 +69,12 @@ const readingMode = ref<"transcript" | "visual">("transcript");
 const visualStatus = ref("");
 const showTimestamps = ref(false);
 const downloadError = ref("");
-let viewIsActive = true;
-onBeforeUnmount(() => {
-  viewIsActive = false;
-});
 
 watch(
   () => route.query.file,
   (value) => {
     downloadError.value = "";
-    readingMode.value = "transcript";
+    readingMode.value = route.query.view === "visual" ? "visual" : "transcript";
     visualStatus.value = "";
     const fileId = typeof value === "string" ? Number(value) : 0;
     if (Number.isSafeInteger(fileId) && fileId > 0) void selectVideo(fileId);
@@ -92,11 +85,6 @@ watch(
 
 function openRecording(fileId: number): void {
   void router.push({ name: "transcription", query: { file: String(fileId) } });
-}
-
-async function uploadAndMonitor(file: File): Promise<void> {
-  const result = await uploadRecording(file);
-  if (result && viewIsActive) openRecording(result.file_id);
 }
 
 function retryStatus(): void {
@@ -136,10 +124,8 @@ async function saveTranscript(): Promise<void> {
         <p>Turn recordings into readable, searchable knowledge.</p>
       </div>
     </div>
-    <VideoUpload
-      :uploading="uploading"
-      :error="uploadError"
-      @upload="uploadAndMonitor"
+    <UploadEntry
+      description="Add MP4 recordings once, then choose transcription, optional visuals and storage comparison in Upload Files."
     />
     <p v-if="loadingStatus" role="status">Loading processing status...</p>
     <div v-if="statusError">

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.transcription_worker import manage_transcription_worker
 
 from app.api.presentations import router as presentations_router
+from app.api.uploads import router as uploads_router
 from app.api.duplicates import router as duplicates_router
 from app.api.files import router
 from app.api.search import router as search_router
@@ -35,6 +36,7 @@ app.include_router(search_router)
 app.include_router(duplicates_router)
 app.include_router(transcription_router)
 app.include_router(presentations_router)
+app.include_router(uploads_router)
 
 
 @app.get("/health")
