@@ -20,5 +20,8 @@ function openTranscriptSegment(fileId: number, segmentId: number): void {
 </script>
 
 <template>
-  <DocumentSearch @open-page="openDocumentPage" @open-segment="openTranscriptSegment" />
+  <DocumentSearch
+    @open-page="openDocumentPage"
+    @open-segment="openTranscriptSegment"
+  />
 </template>

@@ -1,102 +1,125 @@
 # ReStore frontend
 
-Vue 3, TypeScript, Vite, and Vue Router. See the [project README](../README.md) for
-backend setup, API documentation, and feature limitations.
+Vue 3, TypeScript, Vite and Vue Router, with Lucide icons (`@lucide/vue`). The navy,
+blue and neutral palette is an Ericsson-inspired hackathon concept; no official
+Ericsson assets or logo are used. The redesign changes only frontend code.
 
-Run `npm install` and `npm run dev` from this directory. The API defaults to
-`http://localhost:8000`; override it with `VITE_API_URL`. Run `npm run build` for
-TypeScript checks and a production build. `npm run preview` serves that build.
+## Run and verify
 
-## Navigation and feature ownership
+```sh
+npm install
+npm run dev
+npm test
+npm run build
+npm run preview
+```
 
-| Route | View | Feature |
-| --- | --- | --- |
-| `/files` | `views/FilesView.vue` | Retrieve, refresh, and open saved files |
-| `/extract` | `views/PdfExtractionView.vue` | Upload PDFs and view saved metadata/page text |
-| `/search` | `views/DocumentSearchView.vue` | Search saved text and open matching pages |
-| `/duplicates` | `views/DuplicatesView.vue` | Scan stored hashes and review grouped files/potential savings |
-| `/transcription` | `views/VideoTranscriptionView.vue` | Upload MP4s, follow jobs, reopen/download saved transcripts |
+Use Node 22.18+ or Node 24. `npm test` runs five file-management tests using Node's
+built-in test/assert modules and TypeScript stripping. `npm run build` runs
+`vue-tsc -b` and Vite's production build. No component or test framework was added.
 
-`/` redirects to `/files`. Unknown paths also redirect to `/files`.
+The API defaults to `http://localhost:8000`; set `VITE_API_URL` to override it.
+The backend permits the existing frontend origin `http://localhost:5173`.
+Production hosting must return `index.html` for frontend paths so direct links,
+refresh, and browser history work. API requests keep using their existing origin.
+For the Docker setup, rebuild only the frontend after UI changes:
 
-`router/index.ts` defines the routes using HTML5 history. `main.ts` installs the
-router. `App.vue` contains the shared header, `AppNavigation`, and `RouterView`.
-Navigation uses real `RouterLink` anchors; Vue Router applies the active-link
-class and `aria-current="page"` automatically.
+```sh
+docker compose up -d --build --no-deps frontend
+```
 
-Opening a saved file navigates to `/extract?file=4`. Search results navigate to
-`/extract?file=4&page=2`. The extraction view watches these query parameters so
-initial navigation, refresh, and browser back/forward all load the selected saved
-document. The same page viewer marks, scrolls to, and focuses the matching page.
-Returning to Files reloads the list, including newly uploaded PDFs. Search form
-state is local to the search page and resets when leaving that page.
+## Navigation and workflows
 
-Vite development and preview servers support direct URLs. When deploying the
-production `dist/` directory, configure the frontend web server to serve
-`index.html` for frontend routes such as `/files`, `/extract`, `/search`, `/duplicates`, and `/transcription`.
-Keep backend API traffic directed to its existing API origin. This fallback is
-required for direct links and refresh with HTML5 history.
+| Route            | Purpose                                                                |
+| ---------------- | ---------------------------------------------------------------------- |
+| `/overview`      | File counts, recent files, recent recording jobs, duplicate savings    |
+| `/files`         | Central workspace: filter, sort, page through files and open details   |
+| `/search`        | Search PDF content and video transcripts using the existing search API |
+| `/duplicates`    | Scan exact duplicates, inspect expandable groups and potential savings |
+| `/extract`       | Existing PDF upload, metadata, page accordion and page navigation      |
+| `/transcription` | Existing MP4 upload, job polling, readable transcripts and downloads   |
+| `/storage`       | Select a file and display its existing storage comparison              |
 
-## Where changes belong
+`/` opens Overview. Unknown routes retain the Files fallback. The sidebar collapses
+on desktop and becomes a native modal navigation drawer below 900px. The header
+opens the unified upload dialog. Ctrl/Cmd+K navigates to Search and focuses its
+input. Dialogs support keyboard navigation, focus trapping and Escape dismissal.
 
-- `components/AppNavigation.vue`: navigation labels, links, and active/hover styles.
-- `components/files/`: existing upload, file table, metadata, and extracted-page components.
-- `components/search/`: existing search form, request states, and result display.
-- `components/duplicates/`: summary statistics and grouped file tables.
-- `components/transcription/`: video picker, backend job stages, and transcript viewer.
-- `composables/useTranscription.ts`: saved recordings, upload state, and polling lifecycle.
-- `services/transcription.ts` and `types/transcription.ts`: typed video/job/transcript APIs.
-- `utils/formatTimestamp.ts`: millisecond timestamp display.
-- `views/DuplicatesView.vue`: scan on entry, manual refresh, loading/empty/error states.
-- `services/duplicates.ts` and `types/duplicate.ts`: typed duplicate API requests/responses.
-- `utils/formatBytes.ts`: decimal byte-unit formatting for duplicate results.
-- `composables/useFiles.ts`: file list loading and refresh state.
-- `composables/useDocument.ts`: upload requests and saved-document state, independent of routing.
-- `services/api.ts` and `services/search.ts`: existing HTTP requests and API errors.
-- `types/`: typed API responses.
-- `style.css`: shared layout and typography.
+Files are searched by filename, filtered by type/status, sorted by name/size/date,
+and paged in groups of 12. File names are truncated in tables with full names in
+tooltips and the details drawer. The drawer has the full selectable SHA-256 hash,
+a clipboard action and links to existing results. There are no bulk controls or
+deletion actions. Recording lists have a filename filter and pages of eight.
 
-Views coordinate navigation. Components receive typed props and emit actions;
-composables own reactive state. API services remain independent of Vue Router.
-Snippets must remain ordinary text interpolation, never `v-html`.
+Unified upload dispatches PDFs to `POST /files/upload` and MP4s to
+`POST /videos/upload`. It shows the actual operation state, never an invented
+progress percentage. PDF upload returns extracted pages; video upload returns a
+job and transcription continues in the background. Existing route-specific
+upload forms remain functional. Upload failures keep the dialog open for retry;
+success navigates to the result and shows a dismissible notification.
 
-## Add another feature tab
+Existing links remain supported:
 
-1. Create a focused view under `src/views/`, reusing components and services.
-2. Register its path, name, and component in `src/router/index.ts`.
-3. Add a named `RouterLink` in `src/components/AppNavigation.vue`.
+- `/extract?file=4` opens saved document text.
+- `/extract?file=4&page=2` opens, focuses and scrolls to that page.
+- `/transcription?file=7` follows the existing job and opens the saved transcript.
+- `/transcription?file=7&segment=12` highlights and focuses a search passage.
+- `/transcription?file=7&view=status` expands the processing information.
+- `/storage?file=7` opens the existing per-file storage comparison.
 
-The shared layout and active-tab indicator then work without changes to `App.vue`.
+The transcript appears before secondary recording information. Timestamps are
+optional in the reader; the compact text download stays readable. Processing and
+storage information can be expanded without leaving the result. Search text is
+always interpolated as text, never inserted with `v-html`.
 
-## Verification
+## Data scope and unavailable states
 
-Run `npm run build` to execute `vue-tsc -b` and Vite's production build. There is
-currently no frontend unit-test framework. Browser checks should cover root
-redirection, all navigation links and active states, direct URLs, refresh,
-back/forward, file retrieval states, upload feedback, search feedback, and links
-from files/search to the selected extracted page.
+- File metadata comes from `GET /files`; recording/job states use the existing
+  video APIs. A failed status request does not prevent browsing file metadata.
+- The file-list API does not expose PDF processing state. PDFs show **Available**,
+  not an invented completed status. Opening details retrieves the actual extraction
+  state through the existing pages endpoint. Missing recording status is **Unknown**.
+- Overview's potential savings KPI is explicitly **exact duplicate copies**, from
+  `GET /duplicates`. It is not combined with optimized-output savings, which could
+  overlap. Failed measurements display unavailable rather than fabricated numbers.
+- Storage Savings reuses `GET /files/{id}/storage-savings`. Original uploads remain
+  retained. Missing images/outputs keep the backend's unavailable/not-generated states.
+- Search filters apply to the existing API's returned result set (up to 20 matches),
+  and the UI states that scope. They do not imply server-side exhaustive filtering.
+- Files and video lists are fetched in full and filtered/paged locally. This fits
+  the hackathon API; larger collections would benefit from future server paging.
+- No backend endpoints, PostgreSQL schema, upload validation, transcription worker,
+  extraction logic, or API contracts were changed for this redesign.
 
-Verified with the production build in headless Chromium using controlled API
-responses: root and unknown-route redirects, links and active states, direct URLs,
-refresh, back/forward, file loading/empty/error states, upload success/error/loading,
-search results/empty/error states, matching-page focus, query history, missing files,
-and a 320px-wide layout. These browser checks used temporary tooling outside the
-repository and did not change the backend or PostgreSQL.
+## Component ownership
 
-The Duplicates page reads `GET /duplicates`; it does not reprocess PDFs or alter
-files. Summary savings are potential. Refresh errors hide old estimates rather than
-showing them as successful scan results.
+- `components/layout/`: shared app shell, sidebar and header.
+- `components/shared/`: status badges and empty states.
+- `components/files/`: table, filters, details drawer, unified upload and PDF readers.
+- `components/search/`, `duplicates/`, `transcription/`, `storage/`: existing feature UIs.
+- `composables/useWorkspace.ts`: independent file/video loading with partial failures.
+- `utils/files.ts`: typed file classification, filtering, sorting and destinations.
+- `composables/useDocument.ts` and `useTranscription.ts`: existing extraction state and
+  sequential job polling, including cancellation on unmount and terminal states.
+- `services/` and `types/`: existing API requests and response contracts.
+- `style.css`: shared tokens, compact controls, application layout and responsive rules.
+- `router/index.ts`: route registration, page titles and retained deep links.
 
-Duplicates browser checks also compared the displayed groups and summary against
-a live PostgreSQL-backed API response and confirmed that manual scans issue fresh
-GET requests. Controlled responses exercised empty results,
-failures, and recovery. Existing file metadata was identical before and after the
-live scans, and the original tabs passed their production-browser regressions.
+To add a page, register the route with its title in `router/index.ts`, then add an
+item to the relevant group in `AppSidebar.vue`.
 
-Video selections use `/transcription?file=12`. Opening a saved recording reads its
-existing job and transcript; it never creates another job. Polling is sequential,
-stops on terminal states or unmount, and offers Retry status after a temporary
-request error. The backend starts its transcription worker automatically;
-see the project README for supervision and optional standalone-worker settings. MP4 entries in Files
-open this viewer instead of the PDF page. Download fetches the stored plain-text
-export, so no media processing runs during download.
+## Redesign verification
+
+Executed TypeScript/production build checks and the five Node unit tests. Headless
+Chromium workflow checks also exercised navigation/active state, sidebar collapse,
+filter combinations, sorting, pagination, long filenames, metadata drawers,
+PDF/MP4 uploads, upload errors/retry, video polling, transcript download, optional
+timestamps, mixed search/filtering, matching page/segment links, duplicate scans,
+refresh/deep links, loading/empty/error states and mobile navigation.
+
+Controlled API responses were used for upload and error paths, without modifying
+application data. Separate read-only checks against the live API covered actual
+files, extraction results, transcript downloads, clipboard copying, search,
+duplicates, storage comparisons, and all seven routes at 320px and 390px. Existing
+file metadata was identical before and after these checks. Browser tooling was
+installed temporarily outside the repository; it is not an application dependency.

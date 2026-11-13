@@ -1,4 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
+import OverviewView from "../views/OverviewView.vue";
+import StorageSavingsView from "../views/StorageSavingsView.vue";
 import DuplicatesView from "../views/DuplicatesView.vue";
 import VideoTranscriptionView from "../views/VideoTranscriptionView.vue";
 import FilesView from "../views/FilesView.vue";
@@ -8,12 +10,49 @@ import DocumentSearchView from "../views/DocumentSearchView.vue";
 export const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: "/", redirect: "/files" },
-    { path: "/files", name: "files", component: FilesView },
-    { path: "/extract", name: "extract", component: PdfExtractionView },
-    { path: "/search", name: "search", component: DocumentSearchView },
-    { path: "/duplicates", name: "duplicates", component: DuplicatesView },
-    { path: "/transcription", name: "transcription", component: VideoTranscriptionView },
+    { path: "/", redirect: "/overview" },
+    {
+      path: "/overview",
+      name: "overview",
+      component: OverviewView,
+      meta: { title: "Overview" },
+    },
+    {
+      path: "/storage",
+      name: "storage",
+      component: StorageSavingsView,
+      meta: { title: "Storage Savings" },
+    },
+    {
+      path: "/files",
+      name: "files",
+      meta: { title: "Files" },
+      component: FilesView,
+    },
+    {
+      path: "/extract",
+      name: "extract",
+      meta: { title: "PDF Extraction" },
+      component: PdfExtractionView,
+    },
+    {
+      path: "/search",
+      name: "search",
+      meta: { title: "Search" },
+      component: DocumentSearchView,
+    },
+    {
+      path: "/duplicates",
+      name: "duplicates",
+      meta: { title: "Duplicates" },
+      component: DuplicatesView,
+    },
+    {
+      path: "/transcription",
+      name: "transcription",
+      meta: { title: "Video Transcription" },
+      component: VideoTranscriptionView,
+    },
     { path: "/:pathMatch(.*)*", redirect: "/files" },
   ],
   scrollBehavior(_to, _from, savedPosition) {

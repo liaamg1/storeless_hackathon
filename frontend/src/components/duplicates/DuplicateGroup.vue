@@ -1,43 +1,68 @@
 <script setup lang="ts">
+import { RouterLink } from "vue-router";
+import { Copy, ChevronRight } from "@lucide/vue";
 import type { DuplicateGroup } from "../../types/duplicate";
 import { formatBytes } from "../../utils/formatBytes";
-
+import { fileType, formatDate } from "../../utils/files";
 defineProps<{ group: DuplicateGroup; groupNumber: number }>();
-
-function formatUploadDate(uploadedAt: string | null): string {
-  return uploadedAt ? new Date(uploadedAt).toLocaleString() : "Unknown";
-}
 </script>
-
 <template>
-  <section :aria-labelledby="`duplicate-group-${groupNumber}`">
-    <h2 :id="`duplicate-group-${groupNumber}`">
-      Duplicate group {{ groupNumber }}
-      <span class="badge">Exact match</span>
-    </h2>
-    <p>{{ group.file_count }} files · {{ formatBytes(group.file_size_bytes) }} each</p>
-    <p>Potential savings: <strong>{{ formatBytes(group.potential_savings_bytes) }}</strong></p>
-    <p class="hash">SHA-256: {{ group.sha256 }}</p>
-    <div class="table-container">
-      <table>
-        <caption>Files in duplicate group {{ groupNumber }}</caption>
-        <thead>
-          <tr><th scope="col">Filename</th><th scope="col">Size</th><th scope="col">Uploaded</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="file in group.files" :key="file.id">
-            <td>{{ file.filename }}</td>
-            <td>{{ formatBytes(file.size_bytes) }}</td>
-            <td>{{ formatUploadDate(file.uploaded_at) }}</td>
-          </tr>
-        </tbody>
-      </table>
+  <details class="duplicate-card">
+    <summary>
+      <div>
+        <ChevronRight :size="17" class="expand-chevron" /><span
+          class="file-type-icon"
+          ><Copy :size="18"
+        /></span>
+        <div>
+          <h3>
+            Duplicate group {{ groupNumber }}
+            <span class="exact-match">Exact match</span>
+          </h3>
+          <p>
+            {{ group.file_count }} matching files ·
+            {{ formatBytes(group.file_size_bytes) }} each
+          </p>
+        </div>
+      </div>
+      <span class="duplicate-group-savings"
+        >{{ formatBytes(group.potential_savings_bytes)
+        }}<small>potential savings</small></span
+      >
+    </summary>
+    <div class="duplicate-group-body">
+      <p class="hash">SHA-256: {{ group.sha256 }}</p>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>File name</th>
+              <th>Size</th>
+              <th>Uploaded</th>
+              <th><span class="sr-only">Results</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="file in group.files" :key="file.id">
+              <td class="break-word">{{ file.filename }}</td>
+              <td class="nowrap">{{ formatBytes(file.size_bytes) }}</td>
+              <td class="nowrap">{{ formatDate(file.uploaded_at) }}</td>
+              <td>
+                <RouterLink
+                  :to="{
+                    name:
+                      fileType(file.filename) === 'video'
+                        ? 'transcription'
+                        : 'extract',
+                    query: { file: String(file.id) },
+                  }"
+                  >Open</RouterLink
+                >
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
-  </section>
+  </details>
 </template>
-
-<style scoped>
-.badge { display: inline-block; padding: 4px 8px; border-radius: 4px; background: #e8f3ed; font-size: 0.8rem; }
-.hash { font-family: monospace; overflow-wrap: anywhere; }
-caption { text-align: left; font-size: 0.9rem; }
-</style>

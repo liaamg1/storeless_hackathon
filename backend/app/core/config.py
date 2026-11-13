@@ -42,7 +42,7 @@ class TranscriptionSettings:
 
 
 def get_transcription_settings() -> TranscriptionSettings:
-    max_bytes = int(os.getenv("MAX_VIDEO_UPLOAD_BYTES", "200000000"))
+    max_bytes = int(os.getenv("MAX_VIDEO_UPLOAD_BYTES", "3000000000"))
     timeout = int(os.getenv("MEDIA_TIMEOUT_SECONDS", "3600"))
     if max_bytes <= 0 or timeout <= 0:
         raise ValueError("Video upload limit and media timeout must be positive")

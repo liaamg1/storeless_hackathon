@@ -1,6 +1,7 @@
 import json
 import math
 import subprocess
+import wave
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,22 @@ from app.processors import audio_extractor, speech_recognizer
 from app.processors.audio_extractor import MediaProcessingError, MediaToolUnavailableError
 from app.schemas.transcription import VideoTranscript
 from app.services.transcript_export import format_transcript
+
+
+def test_installed_speech_decoder_can_read_extracted_wav(tmp_path):
+    """Catch PyAV/Faster Whisper API incompatibilities without downloading a model."""
+    from faster_whisper.audio import decode_audio
+
+    path = tmp_path / 'extracted.wav'
+    with wave.open(str(path), 'wb') as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b'\x00\x00' * 16000)
+
+    decoded = decode_audio(str(path), sampling_rate=16000)
+    assert decoded.shape == (16000,)
+    assert not decoded.any()
 
 
 @pytest.mark.parametrize('seconds,expected', [(0, 0), (1.234, 1234), (60.5, 60500)])

@@ -26,3 +26,5 @@ websockets==16.1.1
 python-multipart==0.0.32
 PyMuPDF==1.28.2
 faster-whisper==1.2.1
+# faster-whisper 1.2.1 uses av.open(metadata_errors=...), removed in PyAV 19.
+av==17.1.0

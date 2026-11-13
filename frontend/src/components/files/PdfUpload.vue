@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { FileText } from "@lucide/vue";
+import { formatBytes } from "../../utils/formatBytes";
 import { ref } from "vue";
 
 defineProps<{ uploading: boolean; error: string; success: string }>();
@@ -12,14 +14,33 @@ function selectFile(event: Event): void {
 </script>
 
 <template>
-  <section aria-labelledby="upload-heading">
-    <h2 id="upload-heading">Upload a PDF</h2>
-    <p>Extract selectable text from each page. Image-only scans require OCR, which is not available.</p>
+  <section aria-labelledby="upload-heading" class="feature-upload">
+    <h2 id="upload-heading"><FileText :size="18" /> Upload document</h2>
+    <p>
+      Extract selectable text from each page. Image-only scans require OCR,
+      which is not available.
+    </p>
     <form @submit.prevent="selectedFile && emit('upload', selectedFile)">
       <label for="pdf-file">Choose PDF</label>
-      <input id="pdf-file" type="file" accept=".pdf,application/pdf" :disabled="uploading" @change="selectFile" />
-      <p>{{ selectedFile ? `Selected file: ${selectedFile.name}` : "No file selected." }}</p>
-      <button type="submit" :disabled="!selectedFile || uploading">
+      <input
+        id="pdf-file"
+        type="file"
+        accept=".pdf,application/pdf"
+        :disabled="uploading"
+        @change="selectFile"
+      />
+      <p>
+        {{
+          selectedFile
+            ? `${selectedFile.name} · ${formatBytes(selectedFile.size)}`
+            : "No file selected."
+        }}
+      </p>
+      <button
+        class="button-primary"
+        type="submit"
+        :disabled="!selectedFile || uploading"
+      >
         {{ uploading ? "Processing..." : "Upload" }}
       </button>
     </form>

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { ScanLine } from "@lucide/vue";
+import EmptyState from "../components/shared/EmptyState.vue";
 import DuplicateSummary from "../components/duplicates/DuplicateSummary.vue";
 import DuplicateGroup from "../components/duplicates/DuplicateGroup.vue";
 import { fetchDuplicateGroups } from "../services/duplicates";
@@ -17,7 +19,10 @@ async function scanForDuplicates(): Promise<void> {
   try {
     response.value = await fetchDuplicateGroups();
   } catch (failure) {
-    error.value = failure instanceof Error ? failure.message : "Could not scan for duplicates.";
+    error.value =
+      failure instanceof Error
+        ? failure.message
+        : "Could not scan for duplicates.";
   } finally {
     loading.value = false;
   }
@@ -28,20 +33,38 @@ onMounted(scanForDuplicates);
 
 <template>
   <div>
-    <section aria-labelledby="duplicates-heading">
-      <h2 id="duplicates-heading">Duplicate file detection</h2>
-      <p>Find files with matching SHA-256 hashes and sizes, even when filenames differ.</p>
-      <p>Scans use stored metadata. Original files are not opened, modified, or deleted.</p>
-      <button type="button" :disabled="loading" @click="scanForDuplicates">Scan for Duplicates</button>
-      <p v-if="loading" role="status">Scanning for duplicates...</p>
-      <p v-else-if="error" class="error" role="alert">{{ error }}</p>
-    </section>
+    <div class="page-intro">
+      <div>
+        <p class="eyebrow">Workspace</p>
+        <h1>Duplicates</h1>
+        <p>Find identical files and understand potential storage savings.</p>
+      </div>
+      <button
+        class="button-primary"
+        :disabled="loading"
+        @click="scanForDuplicates"
+      >
+        <ScanLine :size="16" />{{
+          loading ? "Scanning…" : "Scan for Duplicates"
+        }}
+      </button>
+    </div>
+    <p v-if="loading" class="notice" role="status">
+      Scanning stored file metadata…
+    </p>
+    <p v-else-if="error" class="notice error" role="alert">{{ error }}</p>
     <template v-if="response">
       <DuplicateSummary :summary="response.summary" />
-      <p v-if="response.groups.length === 0" role="status">No duplicates found.</p>
+      <EmptyState
+        v-if="response.groups.length === 0"
+        title="No duplicates found"
+        description="All stored files have distinct content and size combinations."
+      />
       <DuplicateGroup
-        v-for="(group, index) in response.groups" :key="`${group.sha256}-${group.file_size_bytes}`"
-        :group="group" :group-number="index + 1"
+        v-for="(group, index) in response.groups"
+        :key="`${group.sha256}-${group.file_size_bytes}`"
+        :group="group"
+        :group-number="index + 1"
       />
     </template>
   </div>

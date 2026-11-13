@@ -1,43 +1,69 @@
 <script setup lang="ts">
+import { FileText, Video, ArrowUpRight } from "@lucide/vue";
 import { formatTimestamp } from "../../utils/formatTimestamp";
 import type { SearchResponse } from "../../types/search";
-
+import EmptyState from "../shared/EmptyState.vue";
 defineProps<{ response: SearchResponse }>();
 defineEmits<{
   openPage: [fileId: number, pageNumber: number];
   openSegment: [fileId: number, segmentId: number];
 }>();
 </script>
-
 <template>
-  <div>
-    <p v-if="response.returned_count === 0" role="status">
-      No matches found for “{{ response.query }}”. Try different terms or upload a PDF with selectable text or transcribe an MP4 recording.
-    </p>
-    <template v-else>
-      <p role="status">
-        Showing {{ response.returned_count }} {{ response.returned_count === 1 ? "match" : "matches" }} for “{{ response.query }}”.
+  <div aria-live="polite">
+    <EmptyState
+      v-if="response.returned_count === 0"
+      title="No matching results"
+      description="Try different terms or change the result filter."
+    />
+    <template v-else
+      ><p class="muted" style="font-size: 12px">
+        {{ response.returned_count }}
+        {{ response.returned_count === 1 ? "result" : "results" }} for “{{
+          response.query
+        }}”
       </p>
-      <ol class="search-results">
-        <li v-for="result in response.results" :key="`${result.file_type}-${result.file_id}-${result.file_type === 'pdf' ? result.page_number : result.segment_id}`">
-          <h3>{{ result.filename }}</h3>
-          <p v-if="result.file_type === 'pdf'">PDF · Page {{ result.page_number }}</p>
-          <p v-else>Video · {{ formatTimestamp(result.start_ms) }} – {{ formatTimestamp(result.end_ms) }}</p>
-          <!-- Text interpolation keeps even HTML found in stored text inert. -->
-          <p class="snippet">{{ result.snippet }}</p>
-          <p class="relevance">Relevance score: {{ result.relevance.toPrecision(3) }}</p>
-          <button v-if="result.file_type === 'pdf'" type="button" @click="$emit('openPage', result.file_id, result.page_number)">View page</button>
-          <button v-else type="button" @click="$emit('openSegment', result.file_id, result.segment_id)">View transcript segment</button>
-        </li>
-      </ol>
+      <article
+        v-for="result in response.results"
+        :key="`${result.file_type}-${result.file_id}-${result.file_type === 'pdf' ? result.page_number : result.segment_id}`"
+        class="result-card"
+      >
+        <span class="file-type-icon" :class="result.file_type"
+          ><component
+            :is="result.file_type === 'pdf' ? FileText : Video"
+            :size="18"
+        /></span>
+        <div>
+          <div class="result-heading">
+            <h3>{{ result.filename }}</h3>
+            <span class="result-meta">{{
+              result.file_type === "pdf" ? "PDF document" : "Video recording"
+            }}</span>
+          </div>
+          <p class="result-meta">
+            {{
+              result.file_type === "pdf"
+                ? `Page ${result.page_number}`
+                : formatTimestamp(result.start_ms) +
+                  " – " +
+                  formatTimestamp(result.end_ms)
+            }}
+          </p>
+          <!-- Interpolation keeps uploaded content inert, even if it contains HTML. -->
+          <p class="result-snippet">{{ result.snippet }}</p>
+          <button
+            v-if="result.file_type === 'pdf'"
+            @click="$emit('openPage', result.file_id, result.page_number)"
+          >
+            View extracted page <ArrowUpRight :size="13" /></button
+          ><button
+            v-else
+            @click="$emit('openSegment', result.file_id, result.segment_id)"
+          >
+            View transcript passage <ArrowUpRight :size="13" />
+          </button>
+        </div>
+      </article>
     </template>
   </div>
 </template>
-
-<style scoped>
-.search-results { list-style: none; padding: 0; }
-li { border-top: 1px solid #dce2e9; padding: 16px 0; }
-h3 { margin: 0; overflow-wrap: anywhere; }
-.snippet { white-space: pre-wrap; overflow-wrap: anywhere; }
-.relevance { font-size: 0.85rem; }
-</style>
