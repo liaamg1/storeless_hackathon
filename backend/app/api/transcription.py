@@ -4,7 +4,8 @@ from typing import TypeVar
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse, StreamingResponse
+from app.services import visual_export, visual_service
 
 from app.processors.audio_extractor import MediaProcessingError, MediaToolUnavailableError
 from app.repositories import transcription_repository as repository
@@ -94,4 +95,33 @@ def download_transcript(file_id: int) -> Response:
             f'attachment; filename="transcript-{file_id}.txt"; '
             f"filename*=UTF-8''{quote(filename, safe='')}"
         ),
+    })
+
+
+@router.get('/videos/{file_id}/visual-transcript')
+def visual_transcript(file_id: int) -> dict:
+    return database_response(lambda: visual_service.get_visual_transcript(file_id))
+
+
+@router.post('/videos/{file_id}/visual-transcript', status_code=202)
+def start_visual_transcript(file_id: int) -> dict:
+    return database_response(lambda: visual_service.enqueue(file_id))
+
+
+@router.get('/videos/{file_id}/visuals/{frame_id}/image')
+def visual_image(file_id: int, frame_id: int) -> FileResponse:
+    path = database_response(lambda: visual_service.image_path(file_id, frame_id))
+    return FileResponse(path, media_type='image/jpeg')
+
+
+@router.get('/videos/{file_id}/visual-transcript/download')
+def download_visual_transcript(file_id: int, timestamps: bool = False) -> StreamingResponse:
+    filename, document = database_response(lambda: visual_export.prepare_download(file_id, timestamps))
+    filename = filename.rsplit('.', 1)[0] + '-visual-transcript.html'
+    return StreamingResponse(document, media_type='text/html', headers={
+        'Content-Disposition': (
+            f'attachment; filename="visual-transcript-{file_id}.html"; '
+            f"filename*=UTF-8''{quote(filename, safe='')}"
+        ),
+        'X-Content-Type-Options': 'nosniff',
     })

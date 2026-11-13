@@ -9,6 +9,8 @@ from app.repositories.transcription_repository import claim_next_job, fail_inter
 from app.services.transcription_service import process_video_job
 from app.repositories.presentation_repository import claim_presentation_job
 from app.services.presentation_service import process_presentation_job
+from app.repositories.visual_repository import claim as claim_visual_job
+from app.services.visual_service import process_visual_job
 
 logger = logging.getLogger(__name__)
 WORKER_LOCK_ID = 72815041
@@ -53,8 +55,12 @@ def run_worker(once: bool = False, wait_for_lock: bool = False) -> None:
                     presentation_job = claim_presentation_job()
                     if presentation_job:
                         process_presentation_job(presentation_job)
-                    elif not once:
-                        stopping.wait(2)
+                    else:
+                        visual_job = claim_visual_job()
+                        if visual_job:
+                            process_visual_job(visual_job)
+                        elif not once:
+                            stopping.wait(2)
                 if once:
                     return
             except Exception as exc:

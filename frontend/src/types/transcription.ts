@@ -1,5 +1,11 @@
 export type JobStatus = "queued" | "processing" | "completed" | "failed";
-export type ProcessingStep = "queued" | "validating_video" | "extracting_audio" | "transcribing_audio" | "saving_transcript" | "completed";
+export type ProcessingStep =
+  | "queued"
+  | "validating_video"
+  | "extracting_audio"
+  | "transcribing_audio"
+  | "saving_transcript"
+  | "completed";
 
 export interface VideoUploadResult {
   file_id: number;
@@ -44,4 +50,23 @@ export interface VideoTranscript {
   status: "completed";
   segments: TranscriptSegment[];
   paragraphs: number[][];
+}
+
+export interface VideoVisual {
+  id: number;
+  file_id: number;
+  start_ms: number;
+  end_ms: number;
+  image_hash: string;
+  size_bytes: number;
+}
+
+export interface VisualTranscript {
+  file_id: number;
+  filename: string;
+  status: JobStatus | "not_processed";
+  current_step: string | null;
+  error_message: string | null;
+  speech_status: JobStatus;
+  sections: { visual: VideoVisual | null; segments: TranscriptSegment[] }[];
 }

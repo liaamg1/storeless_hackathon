@@ -151,3 +151,114 @@ filters, candidate selection, paging, caching, Files/Duplicates navigation, PPTX
 search labels, deep links, and 320px/390px layouts. A final read-only check of the
 running app confirmed existing file metadata, extracted text and transcripts
 were preserved. No test fixtures were uploaded into the development database.
+
+## MP4 visual transcripts
+
+Open a completed recording under **Video Transcription** and select **Visual
+Transcript**. Images appear above the speech associated with them; select an
+image to open it at its saved resolution. **Transcript** retains the existing
+readable text, search links, and text download. Existing recordings have an
+**Extract visuals** button; newly transcribed recordings queue visual analysis
+automatically. Refreshing reuses saved results, and failed analysis can be retried
+without retranscribing speech or changing the original recording.
+
+The existing single background worker handles `video_visuals` jobs after speech
+transcription. FFmpeg decodes incrementally into fixed-size RGB frame buffers;
+only representative JPEG files and bounded metadata are retained. Images are
+letterboxed to 1280 × 720 and compressed at JPEG quality 80. Low-detail/blank
+frames are discarded. Consecutive near-duplicates are skipped using the existing
+64-bit perceptual hash, and returning to an earlier visual reuses its image file.
+Images live under `UPLOAD_DIR/visuals/<file-id>/<attempt>/`; the additive
+`video_frames` table records intervals, hashes, file sizes and internal paths.
+The API serves only completed images inside the generated-visuals directory.
+
+Optional `backend/.env` settings (restart the backend after editing):
+
+```dotenv
+VISUAL_SAMPLE_INTERVAL_SECONDS=5
+VISUAL_HASH_DISTANCE=6
+VISUAL_MAX_FRAMES=300
+```
+
+The interval accepts 1–60 seconds; hash distance accepts 0–64 differing bits
+(lower retains more changes). The positive frame cap bounds stored intervals
+and image metadata even during long demonstrations. Once the cap is reached,
+subsequent speech remains visible without images. `MEDIA_TIMEOUT_SECONDS`
+(default 3600) also limits a visual-analysis attempt. The worker processes one
+job at a time; it never loads an entire MP4 into RAM. Visual analysis has its
+own status, so speech remains readable when image extraction fails or a worker
+restart interrupts it. Failed attempts clean up their generated images.
+
+Each speech segment is assigned once to the image interval with the greatest
+positive overlap; equal overlaps select the earlier image. Segments crossing
+boundaries are never copied into multiple sections. Uncovered speech is retained,
+and visuals displayed during silence remain visible. Timestamps are relative to
+the beginning of the recording and reflect sampled boundaries: a change shorter
+than the sampling interval can be missed. This is a visual-change heuristic,
+not slide recognition: cameras, animations and screen demonstrations can produce
+extra images, small text changes can be missed, and low-detail useful content
+may be discarded. No PDF/PPTX source matching or new AI model is involved.
+
+Potential storage savings now includes actual JPEG bytes from disk plus the
+exact text-download bytes, counting a reused image once. While visual processing
+is pending, failed, or an output image is missing, the total is unavailable.
+Original uploads remain retained and unchanged.
+
+For existing installations, apply this repeatable migration before running the
+new backend (do not remove database volumes):
+
+```sh
+docker compose up -d postgres
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U my -d restore < database/migrations/007_video_visuals.sql
+docker compose up -d --build
+```
+
+API additions:
+
+- `GET /videos/{id}/visual-transcript`: persisted visual status and ordered
+  image references, timestamps and associated speech, with no filesystem paths.
+- `POST /videos/{id}/visual-transcript`: queue older recordings or retry failed
+  visual analysis; queued, processing and completed requests are idempotent.
+- `GET /videos/{id}/visuals/{frame_id}/image`: safely retrieve a committed JPEG.
+
+Tests in `backend/tests/test_video_visuals.py` cover static and distinct screens,
+blank recordings, near duplicates and revisited images, corrupted media, bounded
+reads, timestamp boundaries and gaps, silent sections, automatic queueing,
+image retrieval, real byte measurements, failure cleanup and restart recovery.
+The real decoder test requires FFmpeg; database tests use the disposable schema
+fixture described above. Run the backend suite plus the existing frontend tests
+and production build before deployment.
+
+Verified for visual transcripts: **228 backend tests passed**, **6 frontend tests
+passed**, and the frontend production build succeeded. Chromium checks against
+an isolated API/database exercised real FFmpeg-generated images, speech-only
+fallback, visuals during silence, legacy analysis and failed-job retry, image
+expansion, storage measurements, refresh, and 320px/390px layouts. The additive
+migration was applied to the local Docker app without resetting volumes; existing
+file metadata, extracted page text and speech segments matched their pre-migration
+fingerprints.
+
+### Visual transcript timestamps and downloads
+
+**Show timestamps** controls the visual intervals and speech timestamps. The
+choice is shared with the regular Transcript view. With timestamps hidden,
+speech under each image reads as a continuous paragraph.
+
+**Download with pictures (.html)** saves one self-contained HTML document with
+embedded JPEGs and matching text. Open it offline in a browser or use the
+browser's Print action. The export respects the timestamp checkbox and requires
+completed visual processing; missing or unsafe image files return an error before
+the download begins. Recordings without images can download a text-only HTML
+document. The existing plain-text download remains available.
+
+`GET /videos/{id}/visual-transcript/download?timestamps=false` returns the HTML
+attachment; use `timestamps=true` to include times. Image encoding is streamed
+in fixed chunks. HTML/base64 adds formatting overhead; the existing storage
+comparison continues measuring the underlying text and JPEG content, without
+counting this optional export format twice. No additional migration or dependency
+is required.
+
+Verified for this update: **55 backend tests** covering exports, visual processing
+and transcription, **6 frontend tests**, the production build, and Chromium checks
+of actual downloads, offline images, both timestamp settings, shared preferences,
+speech-only fallback, and 320px/390px controls.

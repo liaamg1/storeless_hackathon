@@ -339,6 +339,7 @@ def test_supervised_worker_waits_for_existing_owner_before_recovery(monkeypatch)
     monkeypatch.setattr(worker, 'fail_interrupted_jobs', lambda: events.append('recover') or 0)
     monkeypatch.setattr(worker, 'claim_next_job', lambda: events.append('claim'))
     monkeypatch.setattr(worker, 'claim_presentation_job', lambda: None)
+    monkeypatch.setattr(worker, 'claim_visual_job', lambda: None)
     worker.run_worker(once=True, wait_for_lock=True)
     assert events == ['busy', 'waiting', 'acquired', 'recover', 'claim']
 

@@ -105,9 +105,11 @@ def fail_interrupted_jobs() -> int:
         return connection.execute(
             """UPDATE processing_jobs SET status = 'failed', completed_at = NOW(),
                error_message = CASE WHEN job_type='presentation_analysis' THEN
-                   'Presentation analysis was interrupted. The original file is preserved.' ELSE
+                   'Presentation analysis was interrupted. The original file is preserved.'
+                   WHEN job_type='video_visuals' THEN
+                   'Visual analysis was interrupted. The speech transcript is preserved; retry visual analysis.' ELSE
                    'Processing was interrupted by a worker restart. The original recording is preserved.' END
-               WHERE job_type IN ('video_transcription', 'presentation_analysis') AND status = 'processing'"""
+               WHERE job_type IN ('video_transcription', 'presentation_analysis', 'video_visuals') AND status = 'processing'"""
         ).rowcount
 
 
@@ -132,6 +134,10 @@ def complete_transcription(job: ClaimedVideoJob, result: TranscriptionResult) ->
             connection.execute(
                 """UPDATE processing_jobs SET status = 'completed', current_step = 'completed',
                    error_message = NULL, completed_at = NOW() WHERE id = %s""", (job.job_id,),
+            )
+            connection.execute(
+                """INSERT INTO processing_jobs (file_id, job_type) VALUES (%s, 'video_visuals')
+                   ON CONFLICT (file_id, job_type) DO NOTHING""", (job.file_id,),
             )
 
 

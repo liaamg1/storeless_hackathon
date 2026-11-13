@@ -9,8 +9,10 @@ const loading = ref(false);
 const error = ref("");
 let controller: AbortController | null = null;
 let version = 0;
+let timer: ReturnType<typeof setTimeout> | undefined;
 
 async function loadComparison(): Promise<void> {
+  clearTimeout(timer);
   const requestVersion = ++version;
   controller?.abort();
   controller = new AbortController();
@@ -19,7 +21,11 @@ async function loadComparison(): Promise<void> {
   loading.value = true;
   try {
     const result = await getStorageSavings(props.fileId, controller.signal);
-    if (requestVersion === version) comparison.value = result;
+    if (requestVersion === version) {
+      comparison.value = result;
+      if (result.status === "processing")
+        timer = setTimeout(() => void loadComparison(), 5000);
+    }
   } catch (failure) {
     if (requestVersion === version) {
       error.value =
@@ -39,6 +45,7 @@ watch(
 );
 onBeforeUnmount(() => {
   version += 1;
+  clearTimeout(timer);
   controller?.abort();
 });
 

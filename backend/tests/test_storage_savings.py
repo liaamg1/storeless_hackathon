@@ -5,7 +5,7 @@ import psycopg
 import pytest
 
 from app.processors.speech_recognizer import TranscriptSegment, TranscriptionResult
-from app.repositories import transcription_repository
+from app.repositories import transcription_repository, visual_repository
 from app.services import storage_service
 
 
@@ -23,6 +23,8 @@ def recording(database, tmp_path):
                 transcription_repository.complete_transcription(job, TranscriptionResult(
                     'sv', [TranscriptSegment(0, 1000, text)] if text else [],
                 ))
+                # These fixtures represent fully processed recordings without visuals.
+                visual_repository.complete(visual_repository.claim(), [])
             elif status == 'failed':
                 transcription_repository.fail_job(job.job_id, 'Processing failed.')
         return result, path

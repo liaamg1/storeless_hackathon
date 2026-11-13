@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, watch } from "vue";
 import { formatTimestamp } from "../../utils/formatTimestamp";
 import type { VideoTranscript } from "../../types/transcription";
 
@@ -11,7 +11,9 @@ const props = defineProps<{
 }>();
 defineEmits<{ download: [] }>();
 
-const showTimestamps = ref(false);
+const showTimestamps = defineModel<boolean>("showTimestamps", {
+  default: false,
+});
 const paragraphs = computed(() => {
   const segments = new Map(
     props.transcript.segments.map((segment) => [segment.id, segment]),

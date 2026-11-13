@@ -1,4 +1,8 @@
 """Compare the recorded upload size with measurable, generated output bytes."""
+from pathlib import Path
+
+from app.core.config import get_settings
+from app.repositories import visual_repository
 from app.repositories.file_repository import get_storage_source
 from app.repositories.transcription_repository import get_transcript
 from app.schemas.storage import StorageComponent, StorageSavings
@@ -52,13 +56,30 @@ def get_storage_savings(file_id: int) -> StorageSavings:
         kind='transcript', label='Transcript (.txt)', status='measured',
         size_bytes=len(output), file_count=1,
     )
+    visual_state = visual_repository.state(file_id)
+    if visual_state and visual_state['status'] != 'completed':
+        result.status = 'failed' if visual_state['status'] == 'failed' else 'processing'
+        result.message = 'Visual analysis is not complete. The speech transcript is available; total optimized storage is not yet measurable.'
+        return result
+    if visual_state:
+        paths = {Path(frame['image_path']).resolve() for frame in visual_repository.frames(file_id)}
+        root = (get_settings().upload_dir / 'visuals').resolve()
+        if any(not path.is_relative_to(root) or not path.is_file() for path in paths):
+            result.components[1].status = 'unavailable'
+            result.message = 'An extracted image is missing. Total optimized storage cannot be measured.'
+            return result
+        if paths:
+            result.components[1] = StorageComponent(
+                kind='images', label='Extracted visuals (.jpg)', status='measured',
+                size_bytes=sum(path.stat().st_size for path in paths), file_count=len(paths),
+            )
     result.optimized_size_bytes = sum(
         component.size_bytes for component in result.components
         if component.status == 'measured' and component.size_bytes is not None
     )
     result.status = 'completed'
     result.message = (
-        'Potential savings based on the exact downloadable text file. '
+        'Potential savings based on the exact downloadable text file and any extracted images. '
         'The original upload is still retained.'
     )
     if result.original_size_bytes <= 0:

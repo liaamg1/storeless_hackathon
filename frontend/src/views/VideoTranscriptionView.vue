@@ -16,6 +16,7 @@ import VideoUpload from "../components/transcription/VideoUpload.vue";
 import TranscriptionProgress from "../components/transcription/TranscriptionProgress.vue";
 import StorageSavings from "../components/storage/StorageSavings.vue";
 import TranscriptViewer from "../components/transcription/TranscriptViewer.vue";
+import VisualTranscriptViewer from "../components/transcription/VisualTranscriptViewer.vue";
 import { useTranscription } from "../composables/useTranscription";
 import { downloadTranscript } from "../services/transcription";
 
@@ -67,6 +68,9 @@ watch(recordingPages, (count) => {
   recordingsPage.value = Math.min(recordingsPage.value, count);
 });
 const downloading = ref(false);
+const readingMode = ref<"transcript" | "visual">("transcript");
+const visualStatus = ref("");
+const showTimestamps = ref(false);
 const downloadError = ref("");
 let viewIsActive = true;
 onBeforeUnmount(() => {
@@ -77,6 +81,8 @@ watch(
   () => route.query.file,
   (value) => {
     downloadError.value = "";
+    readingMode.value = "transcript";
+    visualStatus.value = "";
     const fileId = typeof value === "string" ? Number(value) : 0;
     if (Number.isSafeInteger(fileId) && fileId > 0) void selectVideo(fileId);
     else clearSelection();
@@ -148,8 +154,43 @@ async function saveTranscript(): Promise<void> {
       <summary>Processing status <StatusBadge :status="job.status" /></summary>
       <TranscriptionProgress :video="selectedVideo" :job="job" />
     </details>
-    <TranscriptViewer
+    <div
       v-if="transcript"
+      class="transcript-modes"
+      role="group"
+      aria-label="Transcript viewing mode"
+    >
+      <button
+        :aria-pressed="readingMode === 'transcript'"
+        @click="readingMode = 'transcript'"
+      >
+        Transcript
+      </button>
+      <button
+        :aria-pressed="readingMode === 'visual'"
+        @click="readingMode = 'visual'"
+      >
+        Visual Transcript
+      </button>
+    </div>
+    <VisualTranscriptViewer
+      v-if="transcript && readingMode === 'visual'"
+      v-model:show-timestamps="showTimestamps"
+      :file-id="transcript.file_id"
+      @status="visualStatus = $event"
+    >
+      <TranscriptViewer
+        v-model:show-timestamps="showTimestamps"
+        :transcript="transcript"
+        :downloading="downloading"
+        :download-error="downloadError"
+        :selected-segment-id="selectedSegmentId"
+        @download="saveTranscript"
+      />
+    </VisualTranscriptViewer>
+    <TranscriptViewer
+      v-if="transcript && readingMode === 'transcript'"
+      v-model:show-timestamps="showTimestamps"
       :transcript="transcript"
       :downloading="downloading"
       :download-error="downloadError"
@@ -165,7 +206,7 @@ async function saveTranscript(): Promise<void> {
       <StorageSavings
         v-if="selectedVideo"
         :file-id="selectedVideo.file_id"
-        :refresh-key="job?.status"
+        :refresh-key="`${job?.status}-${visualStatus}`"
       />
     </details>
     <section aria-labelledby="recordings-heading" class="recordings-panel">
@@ -272,3 +313,17 @@ async function saveTranscript(): Promise<void> {
     </section>
   </div>
 </template>
+
+<style scoped>
+.transcript-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 24px 0 12px;
+}
+.transcript-modes button[aria-pressed="true"] {
+  background: #175ac6;
+  border-color: #175ac6;
+  color: white;
+}
+</style>
