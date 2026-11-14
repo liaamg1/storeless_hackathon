@@ -95,7 +95,13 @@ onBeforeUnmount(() => {
             {{ match.similarity_percent }}% visual similarity · verify source
           </p>
           <RouterLink
-            :to="{ name: 'slides', query: { file: String(match.file_id) } }"
+            :to="{
+              name: 'slides',
+              query: {
+                file: String(match.file_id),
+                page: String(match.slide_number),
+              },
+            }"
             >Open presentation</RouterLink
           >
           ·

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRoute, RouterLink } from "vue-router";
+import { useRoute, useRouter, RouterLink } from "vue-router";
 import {
   UploadCloud,
   FileText,
@@ -8,6 +8,7 @@ import {
   Presentation,
   X,
   RefreshCw,
+  Copy,
 } from "@lucide/vue";
 import { useFileUpdates } from "../composables/useFileUpdates";
 import { useUnifiedUpload } from "../composables/useUnifiedUpload";
@@ -23,9 +24,11 @@ import ProcessingFileCard from "../components/uploads/ProcessingFileCard.vue";
 import SmartOverview from "../components/uploads/SmartOverview.vue";
 
 const route = useRoute();
+const router = useRouter();
 const {
   items,
   limits,
+  autoStart,
   history,
   historyLoading,
   busy,
@@ -35,14 +38,24 @@ const {
   refresh,
   addFiles,
   addStored,
+  toggleOperation,
+  dismissItem,
   validation,
   canStart,
   start,
 } = useUnifiedUpload();
 useFileUpdates(refresh);
-const tab = ref<"upload" | "review" | "activity">(
-  route.query.file ? "upload" : "review",
-);
+
+type WorkspaceTab = "upload" | "review" | "activity";
+const tab = ref<WorkspaceTab>(route.query.file ? "upload" : "review");
+
+function setTab(next: WorkspaceTab): void {
+  tab.value = next;
+  if (route.query.tab !== next || route.query.file) {
+    void router.replace({ name: "upload", query: { tab: next } });
+  }
+}
+
 watch(
   () => route.query.tab,
   (value) => {
@@ -52,13 +65,26 @@ watch(
   { immediate: true },
 );
 watch(busy, (value, previous) => {
-  if (previous && !value && !pending.value.length) tab.value = "review";
+  if (previous && !value && !pending.value.length) setTab("review");
 });
 const dragging = ref(false),
   existingError = ref("");
 const pending = computed(() =>
   items.value.filter((item) => item.status !== "accepted"),
 );
+const accepted = computed(() =>
+  items.value.filter((item) => item.status === "accepted"),
+);
+const completedCount = computed(
+  () => history.value.filter((file) => file.status === "completed").length,
+);
+const activeCount = computed(
+  () =>
+    history.value.filter(
+      (file) => file.status === "processing" || file.status === "queued",
+    ).length,
+);
+
 let active = true,
   timer: ReturnType<typeof setTimeout> | undefined,
   existingVersion = 0;
@@ -76,12 +102,7 @@ async function poll(): Promise<void> {
   if (active)
     timer = setTimeout(
       () => void poll(),
-      busy.value ||
-        history.value.some(
-          (file) => file.status === "queued" || file.status === "processing",
-        )
-        ? 2500
-        : 10000,
+      busy.value || activeCount.value > 0 ? 2500 : 10000,
     );
 }
 watch(
@@ -94,8 +115,8 @@ watch(
     try {
       const file = await getFileProcessing(id);
       if (active && version === existingVersion) {
-        addStored(file);
         tab.value = "upload";
+        addStored(file, true);
       }
     } catch (error) {
       if (active && version === existingVersion)
@@ -120,74 +141,123 @@ onBeforeUnmount(() => {
 <template>
   <div class="page-intro">
     <div>
-      <p class="eyebrow">Upload · Analyze · Take action</p>
-      <h1>Your workspace</h1>
-      <p>
-        Add files, let analysis finish, then review your storage opportunities.
-      </p>
+      <p class="eyebrow">Workspace</p>
+      <h1>Storage Opportunities</h1>
+      <p>Upload files, review savings recommendations, and clean up duplicates.</p>
     </div>
-    <button class="button-primary" @click="tab = 'upload'">Add files</button>
+    <button
+      v-if="tab !== 'upload'"
+      class="button-primary"
+      aria-label="Add files"
+      @click="setTab('upload')"
+    >
+      <UploadCloud :size="16" /><span>Add files</span>
+    </button>
   </div>
+
   <article
-    v-for="item in items.filter((row) => row.status === 'accepted')"
+    v-for="item in accepted"
     :key="item.key"
     class="accepted-upload"
     :class="{ 'duplicate-upload': item.stored?.reused }"
     role="status"
   >
-    <strong>{{ item.filename }}</strong>
-    <p>{{ uploadResultMessage(item.stored) }}</p>
-    <RouterLink
-      :to="{
-        name: item.stored?.file_type === 'video' ? 'transcription' : 'files',
-        query: { file: String(item.stored?.file_id) },
-      }"
-    >
-      {{
-        item.stored?.reused && item.stored.file_type === "video"
-          ? "Open existing recording results"
-          : "Open file"
-      }}
-    </RouterLink>
-  </article>
-  <aside class="cleanup-shortcut" aria-label="Duplicate cleanup">
-    <div>
-      <strong>Ready to free up space?</strong>
-      <p>
-        Review exact duplicates, choose one copy to keep, then confirm removal
-        of the others.
-      </p>
+    <div class="accepted-upload-body">
+      <strong>{{ item.filename }}</strong>
+      <p>{{ uploadResultMessage(item.stored) }}</p>
+      <div v-if="item.stored" class="accepted-upload-links">
+        <template v-if="item.stored.file_type === 'video'">
+          <RouterLink
+            :to="{
+              name: 'transcription',
+              query: { file: String(item.stored.file_id) },
+            }"
+          >
+            Open Transcript →
+          </RouterLink>
+          <RouterLink
+            :to="{
+              name: 'storage',
+              query: { file: String(item.stored.file_id) },
+            }"
+          >
+            View Storage Comparison →
+          </RouterLink>
+        </template>
+        <template v-else-if="item.stored.file_type === 'pdf'">
+          <RouterLink
+            :to="{
+              name: 'extract',
+              query: { file: String(item.stored.file_id) },
+            }"
+          >
+            Open Document Text →
+          </RouterLink>
+          <RouterLink
+            :to="{
+              name: 'slides',
+              query: { file: String(item.stored.file_id) },
+            }"
+          >
+            Compare Slides →
+          </RouterLink>
+        </template>
+        <template v-else-if="item.stored.file_type === 'pptx'">
+          <RouterLink
+            :to="{
+              name: 'slides',
+              query: { file: String(item.stored.file_id) },
+            }"
+          >
+            Compare Slides →
+          </RouterLink>
+        </template>
+        <RouterLink
+          :to="{
+            name: 'files',
+            query: { file: String(item.stored.file_id) },
+          }"
+        >
+          File Details →
+        </RouterLink>
+      </div>
     </div>
-    <RouterLink class="button-primary" :to="{ name: 'duplicates' }"
-      >Review duplicate cleanup →</RouterLink
+    <button
+      class="icon-button"
+      :aria-label="`Dismiss notice for ${item.filename}`"
+      @click="dismissItem(item.key)"
     >
-  </aside>
-  <nav class="analysis-tabs" aria-label="Analysis views">
-    <button :aria-pressed="tab === 'upload'" @click="tab = 'upload'">
-      Add files</button
-    ><button :aria-pressed="tab === 'review'" @click="tab = 'review'">
-      Recommendations
-      <span>{{
-        history.filter((file) => file.status === "completed").length
-      }}</span></button
-    ><button :aria-pressed="tab === 'activity'" @click="tab = 'activity'">
-      Activity
-      <span
-        >{{
-          history.filter(
-            (file) => file.status === "processing" || file.status === "queued",
-          ).length
-        }}
-        in progress</span
-      >
+      <X :size="16" />
     </button>
-  </nav>
+  </article>
+
+  <div class="workspace-bar">
+    <nav class="analysis-tabs" aria-label="Analysis views">
+      <button :aria-pressed="tab === 'review'" @click="setTab('review')">
+        Recommendations <span>{{ completedCount }}</span>
+      </button>
+      <button :aria-pressed="tab === 'upload'" @click="setTab('upload')">
+        Add files
+        <span v-if="pending.length">{{ pending.length }}</span>
+      </button>
+      <button :aria-pressed="tab === 'activity'" @click="setTab('activity')">
+        Activity
+        <span>{{
+          activeCount ? `${activeCount} running` : history.length
+        }}</span>
+      </button>
+    </nav>
+    <RouterLink class="cleanup-inline-link" :to="{ name: 'duplicates' }">
+      <Copy :size="14" />Review duplicate cleanup →
+    </RouterLink>
+  </div>
+
   <section
     v-show="tab === 'upload'"
     class="central-upload"
     aria-labelledby="select-files-heading"
   >
-    <h2 id="select-files-heading">Select files</h2>
+    <h2 id="select-files-heading">Add files to analyze</h2>
     <label
       class="upload-dropzone"
       :class="{ dragging }"
@@ -195,7 +265,7 @@ onBeforeUnmount(() => {
       @dragleave.prevent="dragging = false"
       @drop.prevent="drop"
       ><UploadCloud :size="30" /><strong>Choose files or drop them here</strong
-      ><span>PDF documents, PPTX presentations and MP4 recordings</span
+      ><span>PDF documents, PPTX presentations, and MP4 recordings</span
       ><input
         type="file"
         multiple
@@ -205,20 +275,41 @@ onBeforeUnmount(() => {
         @change="select"
     /></label>
     <p v-if="limits" class="upload-limits">
-      Current limits: PDF {{ formatBytes(limits.pdf) }} · PPTX
-      {{ formatBytes(limits.pptx) }} · MP4 {{ formatBytes(limits.video) }}
+      Limits: PDF {{ formatBytes(limits.pdf) }} · PPTX
+      {{ formatBytes(limits.pptx) }} · MP4 {{ formatBytes(limits.video) }} ·
+      Originals are retained
     </p>
     <p v-else-if="limitsError" class="error" role="alert">
       {{ limitsError }} <button @click="loadLimits">Retry limits</button>
     </p>
-    <p v-else role="status">Loading current upload limits…</p>
+    <p v-else class="upload-limits" role="status">
+      Loading current upload limits…
+    </p>
+    <details class="advanced-upload-options">
+      <summary>Advanced options</summary>
+      <label class="auto-start-toggle">
+        <input v-model="autoStart" type="checkbox" />
+        Start analysis automatically as soon as files are selected (recommended)
+      </label>
+      <p class="muted" style="font-size: 12px; margin: 4px 0 0">
+        Uncheck to review or customize individual processing operations before
+        starting.
+      </p>
+    </details>
     <p v-if="existingError" class="error" role="alert">{{ existingError }}</p>
     <div v-if="pending.length" class="selected-files">
-      <h2>Ready to analyze</h2>
-      <p class="muted">
-        All supported checks run automatically for each file type. Review the
-        results before deciding what to remove.
-      </p>
+      <div class="panel-heading" style="margin-top: 20px">
+        <h3>Queue ({{ pending.length }})</h3>
+        <button
+          class="button-primary"
+          :disabled="!canStart"
+          @click="start"
+        >
+          <UploadCloud :size="16" />{{
+            busy ? "Uploading…" : "Upload & Analyze"
+          }}
+        </button>
+      </div>
       <article v-for="item in pending" :key="item.key" class="selection-card">
         <header>
           <span class="file-type-icon" :class="detectUploadKind(item.filename)"
@@ -245,26 +336,53 @@ onBeforeUnmount(() => {
                 item.stored ? " · Stored file #" + item.stored.file_id : ""
               }}</small
             >
+            <p
+              v-if="detectUploadKind(item.filename) && autoStart"
+              class="automatic-recipe"
+            >
+              {{
+                operationOptions[detectUploadKind(item.filename)!]
+                  .map((option) => option.label)
+                  .join(" · ")
+              }}
+            </p>
+            <div
+              v-else-if="detectUploadKind(item.filename)"
+              class="operation-checkboxes"
+            >
+              <label
+                v-for="option in operationOptions[
+                  detectUploadKind(item.filename)!
+                ]"
+                :key="option.id"
+              >
+                <input
+                  type="checkbox"
+                  :checked="item.operations.includes(option.id)"
+                  :disabled="busy"
+                  @change="
+                    toggleOperation(
+                      item,
+                      option.id,
+                      ($event.target as HTMLInputElement).checked,
+                    )
+                  "
+                />
+                {{ option.label }}
+              </label>
+            </div>
           </div>
           <button
             class="icon-button"
             :aria-label="`Remove ${item.filename}`"
             :disabled="busy"
-            @click="items = items.filter((row) => row.key !== item.key)"
+            @click="dismissItem(item.key)"
           >
             <X :size="17" />
           </button>
         </header>
         <p v-if="item.stored" class="stored-note">
-          Uses the stored original. Completed analysis is reused and missing
-          checks are run automatically.
-        </p>
-        <p v-if="detectUploadKind(item.filename)" class="automatic-recipe">
-          {{
-            operationOptions[detectUploadKind(item.filename)!]
-              .map((option) => option.label)
-              .join(" · ")
-          }}
+          Reuses stored original and completed checks; runs any missing analysis.
         </p>
         <p v-if="validation(item)" class="error" role="alert">
           {{ validation(item) }}
@@ -282,42 +400,33 @@ onBeforeUnmount(() => {
                 : 'Uploading file'
           "
         />
-        <p v-if="item.status === 'uploading'" role="status">
-          {{
-            item.stored
-              ? "Starting analysis…"
-              : "Uploading and preparing this file…"
-          }}
-        </p>
       </article>
-      <button
-        class="button-primary start-processing"
-        :disabled="!canStart"
-        @click="start"
-      >
-        <UploadCloud :size="16" />{{
-          busy ? "Uploading selected files…" : "Upload & Analyze"
-        }}
-      </button>
-      <p class="upload-note">
-        Files upload one at a time. Processing continues in the background;
-        originals are retained.
-      </p>
     </div>
   </section>
-  <SmartOverview v-show="tab === 'review'" :files="history" />
+
+  <SmartOverview
+    v-show="tab === 'review'"
+    :files="history"
+    :active="tab === 'review'"
+    @add-files="setTab('upload')"
+  />
+
   <section
     v-show="tab === 'activity'"
     class="processing-monitor"
     aria-labelledby="processing-files-heading"
   >
     <header class="panel-heading">
-      <h2 id="processing-files-heading">Processing Files</h2>
-      <button @click="refresh"><RefreshCw :size="15" />Refresh status</button>
+      <div>
+        <h2 id="processing-files-heading">Processing Activity</h2>
+        <p class="muted" style="margin: 4px 0 0; font-size: 13px">
+          Live status for each uploaded file and its analysis steps.
+        </p>
+      </div>
+      <button aria-label="Refresh status" @click="refresh">
+        <RefreshCw :size="15" /><span>Refresh</span>
+      </button>
     </header>
-    <p class="muted">
-      Actual analysis status. Open a file for its results and recommendations.
-    </p>
     <p v-if="historyError" class="error" role="alert">{{ historyError }}</p>
     <ProcessingFileCard
       v-for="file in history"
@@ -328,59 +437,30 @@ onBeforeUnmount(() => {
       Loading processing files…
     </p>
     <p v-else-if="!history.length && !historyError" class="muted">
-      Your processing files will appear here after upload.
+      No files processed yet. Add files to start analyzing.
     </p>
   </section>
 </template>
 <style scoped>
-.cleanup-shortcut {
+.workspace-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
+  gap: 12px;
   flex-wrap: wrap;
-  padding: 20px;
-  margin-bottom: 24px;
-  background: #eef5ff;
-  border: 1px solid #cadff7;
-  border-radius: 12px;
-}
-.cleanup-shortcut > div {
-  flex: 1;
-  min-width: 0;
-}
-.cleanup-shortcut strong {
-  color: #173d70;
-  font-size: 15px;
-}
-.cleanup-shortcut p {
-  font-size: 13px;
-  color: #53677f;
-  line-height: 1.7;
-  margin: 6px 0 0;
-}
-.cleanup-shortcut a {
-  white-space: normal;
-  text-align: center;
-}
-@media (max-width: 600px) {
-  .cleanup-shortcut > div {
-    flex-basis: 100%;
-  }
-}
-
-.analysis-tabs {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding-bottom: 16px;
+  padding-bottom: 14px;
   margin-bottom: 20px;
   border-bottom: 1px solid #dce5ef;
+}
+.analysis-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 .analysis-tabs button {
   background: transparent;
   border-color: transparent;
-  padding: 10px 14px;
+  padding: 8px 14px;
 }
 .analysis-tabs button[aria-pressed="true"] {
   background: #e7f1fc;
@@ -389,53 +469,45 @@ onBeforeUnmount(() => {
 }
 .analysis-tabs span {
   font-size: 11px;
-  color: #66768c;
+  background: #edf2f8;
+  color: #53677f;
+  padding: 1px 6px;
+  border-radius: 10px;
 }
-
-.upload-steps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-  padding: 0;
-  list-style: none;
-  margin: 0 0 24px;
+.analysis-tabs button[aria-pressed="true"] span {
+  background: #d2e5fb;
+  color: #175ac6;
 }
-.upload-steps li {
-  display: flex;
+.cleanup-inline-link {
+  display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 6px;
   font-size: 13px;
   font-weight: 500;
-  color: #53677f;
-}
-.upload-steps span {
-  display: grid;
-  place-items: center;
-  width: 27px;
-  height: 27px;
-  background: #e7f1fc;
-  border-radius: 50%;
   color: #175ac6;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #eef5ff;
+  border: 1px solid #cadff7;
+}
+.cleanup-inline-link:hover {
+  background: #e2eeff;
+  text-decoration: none;
 }
 .central-upload,
 .processing-monitor {
-  padding: clamp(18px, 3vw, 28px);
+  padding: clamp(18px, 3vw, 26px);
 }
-.upload-limits,
-.upload-note {
+.upload-limits {
   font-size: 12px;
   color: #66768c;
-  line-height: 1.7;
-}
-.selected-files > p {
-  font-size: 13px;
-  line-height: 1.7;
+  margin: 0;
 }
 .selection-card {
   border: 1px solid #dce5ef;
-  padding: 18px;
+  padding: 16px;
   border-radius: 10px;
-  margin: 16px 0;
+  margin: 12px 0;
   background: #fbfcfe;
 }
 .selection-card header {
@@ -449,7 +521,7 @@ onBeforeUnmount(() => {
 }
 .selection-card h3 {
   font-size: 14px;
-  margin: 0 0 5px;
+  margin: 0 0 4px;
   overflow-wrap: anywhere;
 }
 .selection-card small {
@@ -459,41 +531,20 @@ onBeforeUnmount(() => {
 .automatic-recipe {
   font-size: 12px;
   color: #66768c;
-  line-height: 1.8;
-}
-.operation-options {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  margin-top: 20px;
-}
-.operation-options label {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  margin: 0;
-}
-.operation-options input {
-  margin: 3px 0 0;
-  flex-shrink: 0;
-}
-.operation-options strong {
-  font-size: 13px;
-  font-weight: 500;
-}
-.operation-options small {
-  display: block;
-  margin-top: 4px;
-  line-height: 1.6;
+  margin: 6px 0 0;
 }
 .stored-note {
   font-size: 12px;
   color: #315978;
-  line-height: 1.7;
+  margin: 10px 0 0;
 }
 .accepted-upload {
-  padding: 16px 20px;
-  margin-bottom: 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
   border: 1px solid #cce4d7;
   border-radius: 10px;
   background: #f1faf5;
@@ -501,28 +552,52 @@ onBeforeUnmount(() => {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+.accepted-upload-body {
+  flex: 1;
+  min-width: 0;
+}
 .accepted-upload p {
   font-size: 13px;
-  line-height: 1.7;
-  margin: 8px 0;
+  margin: 4px 0 6px;
 }
 .duplicate-upload {
   background: #eef5ff;
   border-color: #cadff7;
   color: #173d70;
 }
-.start-processing {
-  margin-top: 6px;
+.accepted-upload-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-weight: 600;
 }
-@media (max-width: 650px) {
-  .operation-options {
-    grid-template-columns: 1fr;
-  }
-  .upload-steps {
-    gap: 10px;
-  }
-  .upload-steps li {
-    font-size: 11px;
-  }
+.advanced-upload-options {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #53677f;
+}
+.advanced-upload-options summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+.auto-start-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-weight: 500;
+  color: #18283d;
+}
+.operation-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.operation-checkboxes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 </style>

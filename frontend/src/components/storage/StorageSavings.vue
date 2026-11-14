@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { API_URL } from "../../services/api";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { RefreshCw } from "@lucide/vue";
 import { getStorageSavings } from "../../services/storage";
+import { getFileProcessing, processStoredFile } from "../../services/uploads";
+import { notifyFilesChanged } from "../../utils/fileUpdates";
+import { detectUploadKind, recommendedOperations } from "../../utils/upload";
 import type { StorageSavings } from "../../types/storage";
 
 const props = defineProps<{ fileId: number; refreshKey?: string }>();
 const comparison = ref<StorageSavings | null>(null);
 const loading = ref(false);
+const running = ref(false);
 const error = ref("");
 let controller: AbortController | null = null;
 let version = 0;
@@ -25,7 +30,7 @@ async function loadComparison(): Promise<void> {
     if (requestVersion === version) {
       comparison.value = result;
       if (result.status === "processing")
-        timer = setTimeout(() => void loadComparison(), 5000);
+        timer = setTimeout(() => void loadComparison(), 3000);
     }
   } catch (failure) {
     if (requestVersion === version) {
@@ -36,6 +41,27 @@ async function loadComparison(): Promise<void> {
     }
   } finally {
     if (requestVersion === version) loading.value = false;
+  }
+}
+
+async function runOrUpdate(): Promise<void> {
+  if (running.value) return;
+  running.value = true;
+  error.value = "";
+  try {
+    const kind =
+      (comparison.value && detectUploadKind(comparison.value.filename)) ??
+      (await getFileProcessing(props.fileId)).file_type;
+    await processStoredFile(props.fileId, recommendedOperations(kind));
+    notifyFilesChanged();
+    await loadComparison();
+  } catch (failure) {
+    error.value =
+      failure instanceof Error
+        ? failure.message
+        : "Could not start or update analysis.";
+  } finally {
+    running.value = false;
   }
 }
 
@@ -100,7 +126,17 @@ function percentage(value: number): string {
           >
         </h2>
       </div>
-      <span class="potential-badge">Potential savings</span>
+      <div class="savings-header-actions">
+        <span class="potential-badge">Potential savings</span>
+        <button
+          type="button"
+          :disabled="running || loading"
+          @click="runOrUpdate"
+        >
+          <RefreshCw :size="14" :class="{ spin: running || loading }" />
+          {{ running ? "Running…" : "Run or Update" }}
+        </button>
+      </div>
     </header>
     <p class="retained-note">
       Your original file is still retained. These figures compare it with the
@@ -270,6 +306,12 @@ function percentage(value: number): string {
 h2 {
   margin: 0;
   overflow-wrap: anywhere;
+}
+.savings-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .potential-badge {
   background: #eff5fb;

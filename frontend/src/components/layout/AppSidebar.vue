@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RouterLink } from "vue-router";
+import { useRoute, RouterLink, type RouteLocationRaw } from "vue-router";
 import {
   LayoutDashboard,
   Folder,
@@ -12,28 +12,116 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Layers3,
-  ChevronRight,
+  UploadCloud,
+  Sparkles,
 } from "@lucide/vue";
 defineProps<{ collapsed?: boolean }>();
 defineEmits<{ toggle: []; navigate: [] }>();
-const groups = [
+const route = useRoute();
+
+interface NavItem {
+  id: string;
+  name: string;
+  label: string;
+  to: RouteLocationRaw;
+  icon: unknown;
+  isActive: () => boolean;
+}
+
+const groups: { label: string; items: NavItem[] }[] = [
   {
     label: "Workspace",
     items: [
-      { name: "upload", label: "Workspace", icon: Layers3 },
-      { name: "files", label: "All files", icon: Folder },
-      { name: "duplicates", label: "Duplicate cleanup", icon: Copy },
-      { name: "search", label: "Search", icon: Search },
+      {
+        id: "home",
+        name: "upload",
+        label: "Home · Upload",
+        to: { name: "upload", query: { tab: "upload" } },
+        icon: UploadCloud,
+        isActive: () =>
+          route.name === "upload" &&
+          (route.query.tab === "upload" || Boolean(route.query.file)),
+      },
+      {
+        id: "files",
+        name: "files",
+        label: "Files",
+        to: { name: "files" },
+        icon: Folder,
+        isActive: () => route.name === "files",
+      },
+      {
+        id: "opportunities",
+        name: "upload",
+        label: "Opportunities",
+        to: { name: "upload", query: { tab: "review" } },
+        icon: Sparkles,
+        isActive: () =>
+          route.name === "upload" &&
+          route.query.tab !== "upload" &&
+          !route.query.file,
+      },
+      {
+        id: "duplicates",
+        name: "duplicates",
+        label: "Duplicate cleanup",
+        to: { name: "duplicates" },
+        icon: Copy,
+        isActive: () => route.name === "duplicates",
+      },
+      {
+        id: "search",
+        name: "search",
+        label: "Search",
+        to: { name: "search" },
+        icon: Search,
+        isActive: () => route.name === "search",
+      },
     ],
   },
   {
     label: "More tools",
     items: [
-      { name: "overview", label: "Dashboard", icon: LayoutDashboard },
-      { name: "slides", label: "Presentation slides", icon: Presentation },
-      { name: "extract", label: "Document text", icon: FileText },
-      { name: "transcription", label: "Recording documents", icon: Video },
-      { name: "storage", label: "Storage details", icon: ChartNoAxesColumn },
+      {
+        id: "transcription",
+        name: "transcription",
+        label: "Video transcription",
+        to: { name: "transcription" },
+        icon: Video,
+        isActive: () => route.name === "transcription",
+      },
+      {
+        id: "slides",
+        name: "slides",
+        label: "Slide comparison",
+        to: { name: "slides" },
+        icon: Presentation,
+        isActive: () => route.name === "slides",
+      },
+      {
+        id: "extract",
+        name: "extract",
+        label: "Document text",
+        to: { name: "extract" },
+        icon: FileText,
+        isActive: () => route.name === "extract",
+      },
+      {
+        id: "storage",
+        name: "storage",
+        label: "Storage savings",
+        to: { name: "storage" },
+        icon: ChartNoAxesColumn,
+        isActive: () => route.name === "storage",
+      },
+      {
+        id: "overview",
+        name: "overview",
+        label: "Dashboard",
+        to: { name: "overview" },
+        icon: LayoutDashboard,
+        isActive: () => route.name === "overview",
+      },
     ],
   },
 ];
@@ -50,18 +138,17 @@ const groups = [
         >ReStore<span class="brand-dot">.</span></span
       ></RouterLink
     >
-    <div v-if="!collapsed" class="workspace-label">
-      <span class="workspace-avatar">R</span>
-      <div>Hackathon Workspace<small>Intelligent storage</small></div>
-      <ChevronRight :size="14" />
-    </div>
     <nav aria-label="Main navigation">
       <component
         :is="group.label === 'More tools' ? 'details' : 'div'"
         v-for="group in groups"
         :key="group.label"
         class="nav-group"
-        :open="collapsed || undefined"
+        :open="
+          collapsed ||
+          group.items.some((item) => item.isActive()) ||
+          undefined
+        "
       >
         <summary
           v-if="group.label === 'More tools'"
@@ -77,13 +164,10 @@ const groups = [
         </p>
         <RouterLink
           v-for="item in group.items"
-          :key="item.name"
-          :to="
-            item.name === 'upload'
-              ? { name: 'upload', query: { tab: 'review' } }
-              : { name: item.name }
-          "
+          :key="item.id"
+          :to="item.to"
           class="nav-link"
+          :class="{ 'is-active': item.isActive() }"
           :title="collapsed ? item.label : undefined"
           :aria-label="collapsed ? item.label : undefined"
           @click="$emit('navigate')"
@@ -96,11 +180,6 @@ const groups = [
       </component>
     </nav>
     <div class="sidebar-bottom">
-      <div v-if="!collapsed" class="sidebar-project">
-        <span class="live-dot" />Ericsson Hackathon<small
-          >ReStore · Demo workspace</small
-        >
-      </div>
       <button
         class="collapse-button"
         :aria-label="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
@@ -121,7 +200,6 @@ const groups = [
   overflow: hidden;
 }
 .sidebar-content > .brand,
-.workspace-label,
 .sidebar-bottom {
   flex-shrink: 0;
 }

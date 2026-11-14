@@ -67,7 +67,7 @@ export const router = createRouter({
       meta: { title: "Video Transcription" },
       component: VideoTranscriptionView,
     },
-    { path: "/:pathMatch(.*)*", redirect: "/files" },
+    { path: "/:pathMatch(.*)*", redirect: "/upload" },
   ],
   scrollBehavior(_to, _from, savedPosition) {
     return savedPosition ?? { top: 0 };

@@ -1,16 +1,25 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { ChartNoAxesColumn } from "@lucide/vue";
+import { useRoute, useRouter, RouterLink } from "vue-router";
+import {
+  ChartNoAxesColumn,
+  Video,
+  FileText,
+  Presentation,
+  ArrowUpRight,
+} from "@lucide/vue";
 import { useWorkspace } from "../composables/useWorkspace";
 import StorageSavings from "../components/storage/StorageSavings.vue";
 import EmptyState from "../components/shared/EmptyState.vue";
+
 const route = useRoute();
 const router = useRouter();
 const { files, loading, error } = useWorkspace();
-const selectedId = computed(() =>
-  typeof route.query.file === "string" ? Number(route.query.file) : 0,
-);
+const selectedId = computed(() => {
+  const id =
+    typeof route.query.file === "string" ? Number(route.query.file) : 0;
+  return Number.isSafeInteger(id) && id > 0 ? id : 0;
+});
 const selected = computed(() =>
   files.value.find((file) => file.id === selectedId.value),
 );
@@ -36,7 +45,7 @@ function choose(event: Event): void {
       ><select
         id="storage-file"
         :value="selectedId || ''"
-        :disabled="loading"
+        :disabled="loading && !files.length"
         @change="choose"
       >
         <option value="">Select a document or recording…</option>
@@ -44,19 +53,61 @@ function choose(event: Event): void {
           {{ file.filename }}
         </option>
       </select>
+      <template v-if="selected">
+        <RouterLink
+          v-if="selected.type === 'video'"
+          class="picker-action-link"
+          :to="{ name: 'transcription', query: { file: String(selected.id) } }"
+        >
+          <Video :size="15" />Open Transcript<ArrowUpRight :size="14" />
+        </RouterLink>
+        <RouterLink
+          v-else-if="selected.type === 'pdf'"
+          class="picker-action-link"
+          :to="{ name: 'extract', query: { file: String(selected.id) } }"
+        >
+          <FileText :size="15" />Open Document Text<ArrowUpRight :size="14" />
+        </RouterLink>
+        <RouterLink
+          v-else-if="selected.type === 'pptx'"
+          class="picker-action-link"
+          :to="{ name: 'slides', query: { file: String(selected.id) } }"
+        >
+          <Presentation :size="15" />Compare Slides<ArrowUpRight :size="14" />
+        </RouterLink>
+      </template>
     </div>
   </section>
-  <p v-if="loading" role="status">Loading files…</p>
-  <p v-else-if="error" class="notice error" role="alert">{{ error }}</p>
+  <p v-if="error && !selectedId" class="notice error" role="alert">
+    {{ error }}
+  </p>
   <StorageSavings
-    v-else-if="selected"
-    :key="selected.id"
-    :file-id="selected.id"
-  /><EmptyState
+    v-if="selectedId"
+    :key="selectedId"
+    :file-id="selectedId"
+  /><p v-else-if="loading" role="status">Loading files…</p>
+  <EmptyState
     v-else
-    :title="
-      selectedId ? 'File not found' : 'A smaller footprint starts with a file'
-    "
-    description="Select a file to compare its original size with measurable optimized output. Original uploads remain retained."
+    title="A smaller footprint starts with a file"
+    description="Select a file above to compare its original size with measurable optimized output. Original uploads remain retained."
   />
 </template>
+<style scoped>
+.picker-action-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 5px;
+  border: 1px solid #d7dee8;
+  background: #fff;
+  color: #175ac6;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.picker-action-link:hover {
+  background: #f1f5fa;
+  text-decoration: none;
+}
+</style>

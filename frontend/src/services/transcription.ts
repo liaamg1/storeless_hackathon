@@ -1,4 +1,4 @@
-import { API_URL, request } from "./api";
+import { API_URL, extractErrorMessage, request } from "./api";
 import type {
   ProcessingJob,
   VideoRecord,
@@ -32,8 +32,15 @@ export async function downloadTranscript(fileId: number): Promise<Blob> {
   const response = await fetch(
     `${API_URL}/videos/${fileId}/transcript/download`,
   );
-  if (!response.ok)
-    throw new Error("Could not download the transcript. Please try again.");
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(
+      extractErrorMessage(
+        body,
+        "Could not download the transcript. Please try again.",
+      ),
+    );
+  }
   return response.blob();
 }
 
@@ -61,9 +68,10 @@ export async function downloadVisualTranscript(
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(
-      typeof body?.detail === "string"
-        ? body.detail
-        : "Could not download the visual transcript. Make sure visual analysis has completed.",
+      extractErrorMessage(
+        body,
+        "Could not download the visual transcript. Make sure visual analysis has completed.",
+      ),
     );
   }
   return response.blob();

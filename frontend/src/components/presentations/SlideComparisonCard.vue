@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import type { SlideComparison } from "../../types/presentation";
 import SlideRevision from "./SlideRevision.vue";
 import { slideImageUrl } from "../../services/presentations";
-const props = defineProps<{ result: SlideComparison }>();
+const props = defineProps<{ result: SlideComparison; highlighted?: boolean }>();
 const matchId = ref<number | null>(null);
 const match = computed(
   () =>
@@ -23,7 +23,12 @@ const labels = {
 };
 </script>
 <template>
-  <article class="slide-card">
+  <article
+    :id="`slide-card-${result.slide.slide_number}`"
+    tabindex="-1"
+    class="slide-card"
+    :class="{ 'highlighted-slide': highlighted }"
+  >
     <header class="panel-heading">
       <h3>Slide {{ result.slide.slide_number }}</h3>
       <span
@@ -136,6 +141,11 @@ const labels = {
 </template>
 
 <style scoped>
+.highlighted-slide {
+  border-color: #175ac6;
+  box-shadow: 0 0 0 2px #175ac633;
+  scroll-margin-top: 90px;
+}
 .slide-recommendation {
   border-left: 3px solid #8daac8;
   background: #f4f8fd;

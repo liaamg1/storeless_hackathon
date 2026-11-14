@@ -327,31 +327,6 @@ section,
 .brand-dot {
   color: #37a4ff;
 }
-.workspace-label {
-  margin: 0 2px 24px;
-  padding: 12px 7px;
-  border-top: 1px solid #ffffff12;
-  border-bottom: 1px solid #ffffff12;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 11px;
-  color: #e3eaf5;
-}
-.workspace-label small {
-  display: block;
-  font-size: 10px;
-  color: #91a3bd;
-}
-.workspace-avatar {
-  display: grid;
-  place-items: center;
-  width: 27px;
-  height: 29px;
-  border-radius: 5px;
-  background: #273650;
-  color: #b8d5f9;
-}
 .nav-group {
   margin: 0 0 24px;
 }
@@ -380,12 +355,12 @@ section,
   color: #fff;
   background: #ffffff09;
 }
-.nav-link.router-link-active {
+.nav-link.is-active {
   background: #0082f01c;
   border-color: #0082f029;
   color: #64b5ff;
 }
-.nav-link.router-link-active:before {
+.nav-link.is-active:before {
   content: "";
   position: absolute;
   left: 0;
@@ -396,18 +371,6 @@ section,
 }
 .sidebar-bottom {
   margin-top: auto;
-}
-.sidebar-project {
-  padding: 14px 12px;
-  border-top: 1px solid #ffffff12;
-  color: #c5d1e1;
-  font-size: 11px;
-}
-.sidebar-project small {
-  display: block;
-  color: #91a3bd;
-  margin: 7px 0 0;
-  font-size: 10px;
 }
 .live-dot {
   display: inline-block;
@@ -476,6 +439,10 @@ section,
 }
 .breadcrumb-root {
   color: #77859a;
+}
+.breadcrumb-root:hover {
+  color: #006fcf;
+  text-decoration: none;
 }
 .header-location strong {
   font-weight: 600;
@@ -700,16 +667,16 @@ td {
   padding: 13px 18px;
 }
 .filename-column {
-  width: 42%;
+  width: 36%;
 }
 .type-column {
-  width: 9%;
+  width: 8%;
 }
 .date-column {
-  width: 17%;
+  width: 15%;
 }
 .actions-column {
-  width: 50px;
+  width: 185px;
 }
 .file-name-button {
   display: flex;
@@ -1067,10 +1034,10 @@ dialog::backdrop {
   display: none;
 }
 .recent-files-panel .filename-column {
-  width: 53%;
+  width: 44%;
 }
 .recent-files-panel .actions-column {
-  width: 45px;
+  width: 175px;
 }
 .recent-files-panel td,
 .recent-files-panel th {
@@ -1207,10 +1174,10 @@ pre {
   table-layout: fixed;
 }
 .recording-table .filename-column {
-  width: 42%;
+  width: 34%;
 }
 .recording-table .actions-column {
-  width: 145px;
+  width: 320px;
 }
 .recording-table button {
   font-size: 12px;
@@ -1551,9 +1518,9 @@ pre {
     margin-bottom: 20px;
   }
   .page-intro > button {
-    font-size: 0;
-    min-width: 34px;
-    padding: 8px;
+    font-size: 12px;
+    padding: 7px 10px;
+    white-space: nowrap;
   }
   .page-intro p:not(.eyebrow) {
     font-size: 13px;
@@ -1876,35 +1843,12 @@ pre {
 .recent-files-panel th {
   font-size: 12px;
 }
-.upload-toast {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 90;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: #fff;
-  border: 1px solid #bfdcca;
-  border-left: 3px solid #15803d;
-  border-radius: 7px;
-  padding: 12px 14px;
-  color: #236347;
-  box-shadow: 0 6px 30px #101b351a;
-  max-width: calc(100vw - 28px);
-  font-size: 13px;
-}
 @media (max-width: 600px) {
   .recent-files-panel .date-column {
     display: none;
   }
   .recent-files-panel .filename-column {
     width: 44%;
-  }
-  .upload-toast {
-    right: 14px;
-    bottom: 14px;
-    font-size: 12px;
   }
 }
 

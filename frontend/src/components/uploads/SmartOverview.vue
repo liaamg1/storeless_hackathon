@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
+import { RefreshCw, UploadCloud } from "@lucide/vue";
 import type { ProcessingFile } from "../../types/upload";
 import type { StorageSavings } from "../../types/storage";
 import type { DuplicateResponse } from "../../types/duplicate";
 import { useFileUpdates } from "../../composables/useFileUpdates";
+import { notifyFilesChanged } from "../../utils/fileUpdates";
 import { getFiles } from "../../services/api";
 import { getStorageSavings } from "../../services/storage";
 import { fetchDuplicateGroups } from "../../services/duplicates";
+import { processStoredFile } from "../../services/uploads";
 import {
   getSlideComparison,
   listPresentations,
@@ -19,16 +22,25 @@ import {
 } from "../../utils/recommendations";
 import { formatBytes } from "../../utils/formatBytes";
 import { recommendedOperations } from "../../utils/upload";
+import EmptyState from "../shared/EmptyState.vue";
+
 function needsAnalysis(file: ProcessingFile) {
   return recommendedOperations(file.file_type).some(
     (operation) => !file.operations.includes(operation),
   );
 }
 
-const props = defineProps<{ files: ProcessingFile[] }>();
-const activeIds = ref(new Set<number>());
+const props = withDefaults(
+  defineProps<{ files: ProcessingFile[]; active?: boolean }>(),
+  { active: true },
+);
+defineEmits<{ addFiles: [] }>();
+
+const activeIds = ref<Set<number> | null>(null);
 const activeFiles = computed(() =>
-  props.files.filter((file) => activeIds.value.has(file.file_id)),
+  activeIds.value === null
+    ? props.files
+    : props.files.filter((file) => activeIds.value!.has(file.file_id)),
 );
 const measurements = ref<Record<number, StorageSavings>>({});
 const matches = ref<Record<number, PresentationRecommendation[]>>({});
@@ -36,7 +48,9 @@ const duplicates = ref<DuplicateResponse | null>(null),
   loading = ref(false),
   error = ref("");
 let version = 0;
-async function load() {
+
+async function load(force = false) {
+  if (!props.active && !force) return;
   const current = ++version;
   loading.value = true;
   error.value = "";
@@ -45,31 +59,41 @@ async function load() {
     listPresentations(),
     getFiles(),
   ]);
+  if (current !== version) return;
   const ids = new Set(
     inventory.status === "fulfilled"
       ? inventory.value.map((file) => file.id)
       : [],
   );
-  const sizes: Record<number, StorageSavings> = {},
-    comparisons: Record<number, PresentationRecommendation[]> = {};
+  if (inventory.status === "fulfilled") activeIds.value = ids;
+  duplicates.value = dupes.status === "fulfilled" ? dupes.value : null;
+
+  const sizes: Record<number, StorageSavings> = force
+      ? {}
+      : { ...measurements.value },
+    comparisons: Record<number, PresentationRecommendation[]> = force
+      ? {}
+      : { ...matches.value };
   await Promise.all(
     props.files
       .filter((file) => ids.has(file.file_id))
       .map(async (file) => {
         if (file.status !== "completed" || needsAnalysis(file)) return;
         try {
-          if (file.file_type === "video")
-            sizes[file.file_id] = await getStorageSavings(file.file_id);
-          else if (
+          if (file.file_type === "video") {
+            if (force || !sizes[file.file_id])
+              sizes[file.file_id] = await getStorageSavings(file.file_id);
+          } else if (
             file.steps.some(
               (step) =>
                 step.operation === "slides" && step.status === "completed",
             )
-          )
+          ) {
             comparisons[file.file_id] = presentationRecommendations(
               await getSlideComparison(file.file_id),
               decks.status === "fulfilled" ? decks.value : [],
             );
+          }
         } catch {
           if (current === version)
             error.value =
@@ -78,8 +102,6 @@ async function load() {
       }),
   );
   if (current !== version) return;
-  activeIds.value = ids;
-  duplicates.value = dupes.status === "fulfilled" ? dupes.value : null;
   measurements.value = sizes;
   matches.value = comparisons;
   loading.value = false;
@@ -89,15 +111,19 @@ async function load() {
   else if (dupes.status === "rejected")
     error.value = "Duplicate information is unavailable. Retry the overview.";
 }
-useFileUpdates(load);
+useFileUpdates(() => load(true));
 watch(
-  () =>
+  () => [
+    props.active,
     props.files
       .map(
         (file) => `${file.file_id}:${file.status}:${file.operations.join(",")}`,
       )
       .join("|"),
-  () => void load(),
+  ],
+  ([isActive]) => {
+    if (isActive) void load();
+  },
   { immediate: true },
 );
 onBeforeUnmount(() => {
@@ -134,7 +160,30 @@ const done = computed(
 );
 const showAll = ref(false);
 const filter = ref("all");
-function action(file: ProcessingFile) {
+const runningIds = ref<Record<number, boolean>>({});
+
+async function runOrUpdate(file: ProcessingFile): Promise<void> {
+  if (runningIds.value[file.file_id]) return;
+  runningIds.value = { ...runningIds.value, [file.file_id]: true };
+  error.value = "";
+  try {
+    await processStoredFile(
+      file.file_id,
+      recommendedOperations(file.file_type),
+    );
+    notifyFilesChanged();
+    await load(true);
+  } catch (cause) {
+    error.value =
+      cause instanceof Error
+        ? cause.message
+        : "Could not run or update analysis.";
+  } finally {
+    runningIds.value = { ...runningIds.value, [file.file_id]: false };
+  }
+}
+
+function buildAction(file: ProcessingFile) {
   const query = { file: String(file.file_id) };
   const result = (
     kind: string,
@@ -156,7 +205,7 @@ function action(file: ProcessingFile) {
       "Analysis needs attention",
       file.error_message ||
         "Retry the incomplete checks. Your original is retained.",
-      "Retry analysis",
+      "Retry Analysis",
       "upload",
     );
   if (file.status !== "completed")
@@ -164,15 +213,15 @@ function action(file: ProcessingFile) {
       "processing",
       "Analysis is running",
       "Recommendations appear when processing finishes.",
-      "View file status",
-      "files",
+      file.file_type === "video" ? "Open Transcript" : "View File Details",
+      file.file_type === "video" ? "transcription" : "files",
     );
   if (needsAnalysis(file))
     return result(
       "attention",
       "Finish the remaining checks",
-      "This file used earlier settings. Complete automatic analysis before making a cleanup decision.",
-      "Complete analysis",
+      "Complete automatic analysis before making a cleanup decision.",
+      "Run or Update",
       "upload",
     );
   const size = measurements.value[file.file_id];
@@ -181,8 +230,8 @@ function action(file: ProcessingFile) {
       return result(
         "save",
         "Review replacing the original recording",
-        "Download and check the document first. Keep the MP4 if you still need audio, motion or full-resolution screens.",
-        "Open optimized document",
+        "Download and verify the compact document first. Keep the MP4 if you still need audio or motion.",
+        "Open Visual Transcript",
         "transcription",
         true,
       );
@@ -192,8 +241,8 @@ function action(file: ProcessingFile) {
       size?.status === "completed"
         ? "The generated document is not smaller than the original."
         : "Storage savings could not be measured. Retain the original.",
-      "View results",
-      "files",
+      "Open Transcript",
+      "transcription",
     );
   }
   const match = matches.value[file.file_id]?.find(
@@ -203,41 +252,42 @@ function action(file: ProcessingFile) {
     return result(
       "review",
       "Review a possible presentation duplicate",
-      `Compare ${match.remove?.filename} with ${match.keep.filename}. ${percent(match.averageSimilarity)}% visual similarity; verify content before removing a copy.`,
-      "Compare presentations",
+      `Compare ${match.remove?.filename} with ${match.keep.filename} (${percent(match.averageSimilarity)}% visual similarity).`,
+      "Compare Slides",
       "slides",
     );
   return result(
     "keep",
     "Keep this document",
     matches.value[file.file_id]?.length
-      ? "Only partial overlap was found. Keep its unmatched content."
+      ? "Only partial slide overlap was found. Keep its unique content."
       : "No whole-file removal candidate was found.",
-    "View results",
-    "files",
+    file.file_type === "pdf" ? "Open Document Text" : "Compare Slides",
+    file.file_type === "pdf" ? "extract" : "slides",
   );
 }
-const filtered = computed(() =>
-  activeFiles.value
+
+const filtered = computed(() => {
+  const rank: Record<string, number> = {
+    attention: 0,
+    save: 1,
+    review: 2,
+    processing: 3,
+    keep: 4,
+  };
+  return activeFiles.value
     .filter((file) => !redundantIds.value.has(file.file_id))
+    .map((file) => ({ file, action: buildAction(file) }))
     .filter(
-      (file) => filter.value === "all" || action(file).kind === filter.value,
+      (item) => filter.value === "all" || item.action.kind === filter.value,
     )
-    .sort((a, b) => {
-      const rank: Record<string, number> = {
-        attention: 0,
-        save: 1,
-        review: 2,
-        processing: 3,
-        keep: 4,
-      };
-      return (
-        rank[action(a).kind]! - rank[action(b).kind]! ||
-        (measurements.value[b.file_id]?.storage_saved_bytes ?? 0) -
-          (measurements.value[a.file_id]?.storage_saved_bytes ?? 0)
-      );
-    }),
-);
+    .sort(
+      (a, b) =>
+        rank[a.action.kind]! - rank[b.action.kind]! ||
+        (measurements.value[b.file.file_id]?.storage_saved_bytes ?? 0) -
+          (measurements.value[a.file.file_id]?.storage_saved_bytes ?? 0),
+    );
+});
 const visible = computed(() =>
   showAll.value ? filtered.value : filtered.value.slice(0, 6),
 );
@@ -255,74 +305,65 @@ function percent(value: number) {
 }
 </script>
 <template>
-  <section class="smart-overview" aria-labelledby="smart-overview-heading">
-    <header>
-      <div>
-        <p class="eyebrow">Review results</p>
-        <h2 id="smart-overview-heading">Your storage opportunities</h2>
-        <p class="muted">
-          Start with the recommended action for each file. Nothing is deleted
-          automatically.
-        </p>
-      </div>
-      <button :disabled="loading" @click="load">Refresh</button>
-    </header>
+  <section class="smart-overview" aria-label="Storage recommendations">
     <div class="insight-stats">
       <div>
-        <small>Files fully analyzed</small
-        ><strong>{{ done }} / {{ files.length }}</strong
-        ><span>More results appear as analysis finishes</span>
+        <small>Files analyzed</small
+        ><strong>{{ done }} / {{ activeFiles.length }}</strong
+        ><span>Completed all checks</span>
       </div>
       <div>
-        <small>Smaller video documents</small
+        <small>Video optimization</small
         ><strong>{{ loading ? "Measuring…" : formatBytes(potential) }}</strong
-        ><span>Potential saving · analyzed videos only</span>
+        ><span>Potential saving · compact exports</span>
       </div>
       <div>
-        <small>Duplicate copies</small
+        <small>Exact duplicates</small
         ><strong>{{
           duplicates
             ? formatBytes(duplicates.summary.potential_savings_bytes)
             : "Unavailable"
         }}</strong
-        ><span>Potential saving · workspace-wide</span>
+        ><span>Potential saving · redundant copies</span>
       </div>
     </div>
-    <details class="scope-note">
-      <summary>How to read these savings</summary>
 
-      <p>
-        These are separate opportunities, not an amount already saved. Redundant
-        copies are excluded from the video total to avoid counting them twice.
-        Video savings use the actual download size, including HTML formatting
-        and embedded images (timestamps off). Slide similarity has no measured
-        byte saving.
-      </p>
-    </details>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <div
-      class="review-filters"
-      role="group"
-      aria-label="Filter recommendations"
-    >
-      <button
-        v-for="option in [
-          { id: 'all', label: 'All files' },
-          { id: 'save', label: 'Save space' },
-          { id: 'attention', label: 'Needs attention' },
-          { id: 'review', label: 'Similar presentations' },
-          { id: 'keep', label: 'Keep' },
-        ]"
-        :key="option.id"
-        :aria-pressed="filter === option.id"
-        @click="
-          filter = option.id;
-          showAll = false;
-        "
+    <div class="review-toolbar">
+      <div
+        class="segmented-control review-filters"
+        role="group"
+        aria-label="Filter recommendations"
       >
-        {{ option.label }}
+        <button
+          v-for="option in [
+            { id: 'all', label: 'All' },
+            { id: 'save', label: 'Save space' },
+            { id: 'attention', label: 'Needs attention' },
+            { id: 'review', label: 'Similar slides' },
+            { id: 'keep', label: 'Keep' },
+          ]"
+          :key="option.id"
+          :class="{ active: filter === option.id }"
+          :aria-pressed="filter === option.id"
+          @click="
+            filter = option.id;
+            showAll = false;
+          "
+        >
+          {{ option.label }}
+        </button>
+      </div>
+      <button
+        :disabled="loading"
+        aria-label="Refresh recommendations"
+        @click="load(true)"
+      >
+        <RefreshCw :size="14" :class="{ spin: loading }" /><span>Refresh</span>
       </button>
     </div>
+
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+
     <article
       v-for="plan in filter === 'all' || filter === 'save'
         ? duplicatePlans.slice(0, 3)
@@ -335,7 +376,8 @@ function percent(value: number) {
           <span class="action-label">Exact duplicate</span>
           <h3>
             {{ plan.remove.length }} redundant
-            {{ plan.remove.length === 1 ? "copy" : "copies" }}
+            {{ plan.remove.length === 1 ? "copy" : "copies" }} of
+            {{ plan.keep.filename }}
           </h3>
         </div>
         <strong class="saving-value"
@@ -343,148 +385,328 @@ function percent(value: number) {
         >
       </div>
       <p>
-        Keep <b>{{ plan.keep.filename }}</b> (#{{ plan.keep.id }}). Review the
-        additional copies for removal.
+        Keep <b>{{ plan.keep.filename }}</b> (#{{ plan.keep.id }}) and remove
+        identical copies ({{
+          plan.remove.map((f) => `#${f.id}`).join(", ")
+        }}).
       </p>
       <RouterLink
         class="primary-action"
         :to="{ name: 'duplicates', query: { file: String(plan.keep.id) } }"
         >Review duplicate copies →</RouterLink
       >
-      <details>
-        <summary>Copies and match evidence</summary>
-        <p v-for="file in plan.remove" :key="file.id">
-          {{ file.filename }} · #{{ file.id }}
-        </p>
-        <p>
-          Recorded checksum and size match. Verify the retained copy and any
-          processing results before removing another copy.
-        </p>
-      </details>
     </article>
+
     <RouterLink
       v-if="
         duplicatePlans.length > 3 && (filter === 'all' || filter === 'save')
       "
+      class="see-all-link"
       :to="{ name: 'duplicates' }"
       >See all {{ duplicatePlans.length }} duplicate groups →</RouterLink
     >
-    <article v-for="file in visible" :key="file.file_id" class="action-card">
+
+    <article
+      v-for="{ file, action } in visible"
+      :key="file.file_id"
+      class="action-card"
+    >
       <div class="action-heading">
         <div>
-          <span class="action-label" :class="action(file).kind">{{
-            labels[action(file).kind]
+          <span class="action-label" :class="action.kind">{{
+            labels[action.kind]
           }}</span>
           <h3>{{ file.filename }}</h3>
         </div>
-        <strong v-if="action(file).kind === 'save'" class="saving-value"
+        <strong v-if="action.kind === 'save'" class="saving-value"
           >{{ formatBytes(measurements[file.file_id]!.storage_saved_bytes!)
           }}<small>potential saving</small></strong
         >
       </div>
-      <h4>{{ action(file).title }}</h4>
-      <p>{{ action(file).description }}</p>
-      <RouterLink class="primary-action" :to="action(file).to"
-        >{{ action(file).label }} →</RouterLink
-      >
-      <details>
-        <summary>Details and evidence</summary>
-        <div
-          v-if="measurements[file.file_id]?.status === 'completed'"
-          class="size-comparison"
-        >
-          <span
-            >Original<b>{{ formatBytes(file.size_bytes) }}</b></span
-          ><span
-            >Download file<b>{{
-              formatBytes(measurements[file.file_id]!.optimized_size_bytes!)
-            }}</b></span
-          ><span
-            >Reduction<b
-              >{{ percent(measurements[file.file_id]!.reduction_percent!) }}%</b
-            ></span
+      <h4>{{ action.title }}</h4>
+      <p>{{ action.description }}</p>
+      <div class="action-footer">
+        <div class="action-buttons-row">
+          <button
+            v-if="action.kind === 'attention'"
+            type="button"
+            class="button-primary"
+            :disabled="runningIds[file.file_id]"
+            @click="runOrUpdate(file)"
           >
+            <RefreshCw :size="14" :class="{ spin: runningIds[file.file_id] }" />
+            {{ runningIds[file.file_id] ? "Running…" : action.label }}
+          </button>
+          <RouterLink v-else class="primary-action" :to="action.to"
+            >{{ action.label }} →</RouterLink
+          >
+
+          <template v-if="file.file_type === 'video'">
+            <RouterLink
+              v-if="action.label !== 'Open Transcript'"
+              class="secondary-action"
+              :to="{
+                name: 'transcription',
+                query: { file: String(file.file_id) },
+              }"
+            >
+              Open Transcript
+            </RouterLink>
+            <RouterLink
+              class="secondary-action"
+              :to="{ name: 'storage', query: { file: String(file.file_id) } }"
+            >
+              View Storage Comparison
+            </RouterLink>
+          </template>
+          <template v-else-if="file.file_type === 'pdf'">
+            <RouterLink
+              class="secondary-action"
+              :to="{ name: 'slides', query: { file: String(file.file_id) } }"
+            >
+              Compare Slides
+            </RouterLink>
+            <RouterLink
+              class="secondary-action"
+              :to="{ name: 'storage', query: { file: String(file.file_id) } }"
+            >
+              View Storage Comparison
+            </RouterLink>
+          </template>
+
+          <button
+            v-if="action.kind !== 'attention'"
+            type="button"
+            class="secondary-action-btn"
+            :disabled="runningIds[file.file_id]"
+            @click="runOrUpdate(file)"
+          >
+            <RefreshCw :size="13" :class="{ spin: runningIds[file.file_id] }" />
+            {{ runningIds[file.file_id] ? "Running…" : "Run or Update" }}
+          </button>
         </div>
-        <p
-          v-for="match in matches[file.file_id]
-            ?.filter((item) => item.action === 'review_removal')
-            .slice(0, 2)"
-          :key="match.candidate.id"
-        >
-          {{ match.matchedSlides }} / {{ match.totalSlides }} selected slides
-          match {{ match.candidate.filename }}.
-          {{ percent(match.averageSimilarity) }}% average visual score. Check
-          wording, numbers, notes, animations and slide order.
-        </p>
-        <p v-if="file.file_type !== 'video'">
-          Slide overlap is a review signal, not proof of identical files or
-          measured storage savings.
-        </p>
-        <RouterLink
-          :to="{ name: 'files', query: { file: String(file.file_id) } }"
-          >All results for this file →</RouterLink
-        >
-      </details>
+        <details class="inline-evidence">
+          <summary>Evidence</summary>
+          <div
+            v-if="measurements[file.file_id]?.status === 'completed'"
+            class="size-comparison"
+          >
+            <span
+              >Original<b>{{ formatBytes(file.size_bytes) }}</b></span
+            ><span
+              >Download file<b>{{
+                formatBytes(measurements[file.file_id]!.optimized_size_bytes!)
+              }}</b></span
+            ><span
+              >Reduction<b
+                >{{
+                  percent(measurements[file.file_id]!.reduction_percent!)
+                }}%</b
+              ></span
+            >
+          </div>
+          <p
+            v-for="match in matches[file.file_id]
+              ?.filter((item) => item.action === 'review_removal')
+              .slice(0, 2)"
+            :key="match.candidate.id"
+          >
+            {{ match.matchedSlides }} / {{ match.totalSlides }} slides match
+            {{ match.candidate.filename }} ({{
+              percent(match.averageSimilarity)
+            }}% average visual score).
+          </p>
+          <p v-if="file.file_type !== 'video'">
+            Visual slide similarity requires manual review before deleting
+            files.
+          </p>
+          <RouterLink
+            :to="{ name: 'files', query: { file: String(file.file_id) } }"
+            >Open file details →</RouterLink
+          >
+        </details>
+      </div>
     </article>
+
     <button v-if="filtered.length > 6" @click="showAll = !showAll">
       {{ showAll ? "Show fewer files" : `Show all ${filtered.length} files` }}
     </button>
-    <p v-if="!files.length" class="muted">
-      Add files in the first tab. Your recommendations will appear here after
-      analysis.
-    </p>
+
+    <EmptyState
+      v-if="!files.length"
+      title="No files analyzed yet"
+      description="Upload PDFs, PowerPoint decks, or MP4 recordings to see storage savings and duplicate recommendations."
+    >
+      <button class="button-primary" @click="$emit('addFiles')">
+        <UploadCloud :size="16" />Add files
+      </button>
+    </EmptyState>
     <p
       v-else-if="
         !visible.length &&
         !(duplicatePlans.length && (filter === 'all' || filter === 'save'))
       "
       class="muted"
+      style="padding: 18px 0"
     >
       No files in this category.
     </p>
   </section>
 </template>
 <style scoped>
-.review-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 20px 0;
+.smart-overview {
+  padding: clamp(18px, 3vw, 26px);
+  margin: 0 0 20px;
+  background: #f6f9fd;
+  border: 1px solid #d9e4f1;
+  border-radius: 12px;
 }
-.review-filters button {
+.insight-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.insight-stats > div {
+  background: white;
+  border: 1px solid #dce5ef;
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+.insight-stats small,
+.insight-stats span {
+  display: block;
+  color: #66768c;
   font-size: 12px;
 }
-.review-filters button[aria-pressed="true"] {
-  background: #175ac6;
-  color: white;
-  border-color: #175ac6;
+.insight-stats strong {
+  display: block;
+  font-size: 25px;
+  margin: 6px 0 4px;
+  color: #175a46;
 }
-.action-card details {
-  margin-top: 18px;
-  padding-top: 12px;
-  border-top: 1px solid #e1e7ef;
+.review-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.review-filters {
+  flex-wrap: wrap;
+}
+.action-card {
+  background: white;
+  border: 1px solid #dce5ef;
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.action-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.action-heading h3 {
+  font-size: 15px;
+  margin: 8px 0 0;
+}
+.action-card h4 {
+  font-size: 14px;
+  margin: 10px 0 4px;
+}
+.action-card p {
+  font-size: 13px;
+  line-height: 1.65;
+  color: #53677f;
+  margin: 0 0 12px;
+}
+.action-card a {
+  font-size: 13px;
+  font-weight: 500;
+}
+.action-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.inline-evidence {
   font-size: 12px;
   color: #66768c;
+  width: 100%;
+  margin-top: 4px;
 }
-.action-card summary {
+.inline-evidence summary {
   cursor: pointer;
+  color: #53677f;
+  font-weight: 500;
+}
+.inline-evidence[open] {
+  padding-top: 10px;
+  border-top: 1px solid #e1e7ef;
+}
+.action-buttons-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.secondary-action {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 11px;
+  border-radius: 6px;
+  border: 1px solid #d7dee8;
+  background: #fff;
+  color: #33445b;
+  font-size: 12px;
+  font-weight: 500;
+}
+.secondary-action:hover {
+  background: #f1f5fa;
+  border-color: #b5c7da;
+  text-decoration: none;
+}
+.secondary-action-btn {
+  min-height: 31px;
+  padding: 5px 10px;
+  font-size: 12px;
 }
 .primary-action {
   display: inline-flex;
-  padding: 8px 12px;
+  padding: 7px 12px;
   border-radius: 6px;
   background: #edf4fc;
   color: #175ac6;
 }
+.primary-action:hover {
+  background: #dfecfa;
+  text-decoration: none;
+}
 .saving-value {
   color: #23634b;
-  font-size: 21px;
+  font-size: 20px;
+  text-align: right;
 }
 .saving-value small {
   display: block;
   font-size: 11px;
   font-weight: normal;
   color: #66768c;
+}
+.action-label {
+  font-size: 11px;
+  color: #315978;
+  background: #edf4fc;
+  padding: 3px 8px;
+  border-radius: 5px;
+  display: inline-block;
+  font-weight: 500;
 }
 .action-label.save {
   color: #23634b;
@@ -495,111 +717,27 @@ function percent(value: number) {
   color: #805522;
   background: #fff6e5;
 }
-.action-heading h3 {
-  margin: 10px 0 0;
-}
-
-.smart-overview {
-  padding: clamp(18px, 3vw, 28px);
-  margin: 24px 0;
-  background: #f6f9fd;
-  border: 1px solid #d9e4f1;
-  border-radius: 12px;
-}
-header,
-.action-heading {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-h2 {
-  margin: 5px 0;
-}
-header p {
-  font-size: 13px;
-  line-height: 1.7;
-}
-.insight-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  margin: 22px 0;
-}
-.insight-stats > div {
-  background: white;
-  border: 1px solid #dce5ef;
-  border-radius: 10px;
-  padding: 18px;
-}
-.insight-stats small,
-.insight-stats span {
-  display: block;
-  color: #66768c;
-  font-size: 12px;
-}
-.insight-stats strong {
-  display: block;
-  font-size: 27px;
-  margin: 10px 0;
-  color: #175a46;
-}
-.scope-note {
-  font-size: 12px;
-  color: #66768c;
-  line-height: 1.7;
-}
-.action-card {
-  background: white;
-  border: 1px solid #dce5ef;
-  border-radius: 10px;
-  padding: 20px;
-  margin: 14px 0;
-  overflow-wrap: anywhere;
-}
-.action-card h3 {
-  font-size: 15px;
-  margin: 0 0 12px;
-}
-.action-card h4 {
-  font-size: 15px;
-  margin: 14px 0 8px;
-}
-.action-card p {
-  font-size: 13px;
-  line-height: 1.8;
-  color: #53677f;
-}
-.action-card a {
-  font-size: 13px;
-  font-weight: 500;
-}
-.action-label {
-  font-size: 11px;
-  color: #315978;
-  background: #edf4fc;
-  padding: 4px 8px;
-  border-radius: 5px;
-  display: inline-block;
-}
 .duplicate-action {
   border-left: 4px solid #ca9d45;
+}
+.see-all-link {
+  display: inline-block;
+  margin: 4px 0 12px;
+  font-size: 13px;
+  font-weight: 500;
 }
 .size-comparison {
   display: flex;
   flex-wrap: wrap;
   gap: 12px 24px;
   font-size: 12px;
-  margin: 16px 0;
+  margin: 12px 0;
 }
 .size-comparison b {
   display: block;
-  font-size: 17px;
-  margin-top: 5px;
-}
-.all-results {
-  display: block;
-  margin-top: 16px;
+  font-size: 15px;
+  margin-top: 3px;
+  color: #18283d;
 }
 @media (max-width: 750px) {
   .insight-stats {

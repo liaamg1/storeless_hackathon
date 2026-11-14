@@ -1,20 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { RouterLink } from "vue-router";
+import { RouterLink, useRoute } from "vue-router";
 import { ScanLine } from "@lucide/vue";
 import EmptyState from "../components/shared/EmptyState.vue";
 import DuplicateSummary from "../components/duplicates/DuplicateSummary.vue";
 import DuplicateGroup from "../components/duplicates/DuplicateGroup.vue";
-import RecommendationPanel from "../components/shared/RecommendationPanel.vue";
 import {
   getCleanupHistory,
   finishCleanup,
+  fetchDuplicateGroups,
   type CleanupResolution,
 } from "../services/duplicates";
 import { useFileUpdates } from "../composables/useFileUpdates";
-import { fetchDuplicateGroups } from "../services/duplicates";
 import type { DuplicateResponse } from "../types/duplicate";
-import { useRoute } from "vue-router";
 
 const response = ref<DuplicateResponse | null>(null);
 const route = useRoute();
@@ -102,30 +100,26 @@ onMounted(scanForDuplicates);
     <div class="page-intro">
       <div>
         <p class="eyebrow">Workspace</p>
-        <h1>Duplicate cleanup</h1>
+        <h1>Duplicate Cleanup</h1>
         <p>
-          Choose one original to keep and confirm removal of its identical
-          copies. Completed cases stay in Cleanup history.
+          Keep one verified original per group and remove identical copies.
         </p>
       </div>
       <button
         class="button-primary"
         :disabled="loading"
+        aria-label="Scan for Duplicates"
         @click="scanForDuplicates"
       >
-        <ScanLine :size="16" />{{
+        <ScanLine :size="16" /><span>{{
           loading ? "Scanning…" : "Scan for Duplicates"
-        }}
+        }}</span>
       </button>
     </div>
     <p v-if="loading" class="notice" role="status">
       Scanning stored file metadata…
     </p>
     <p v-else-if="error" class="notice error" role="alert">{{ error }}</p>
-    <p class="notice">
-      Looking for reused presentation slides?
-      <RouterLink :to="{ name: 'slides' }">Open Slide Comparison</RouterLink>
-    </p>
     <template v-if="response">
       <p v-if="route.query.file" class="notice">
         Showing duplicate groups containing File #{{ route.query.file }}.
@@ -134,36 +128,24 @@ onMounted(scanForDuplicates);
         >
       </p>
       <DuplicateSummary :summary="visibleSummary" />
-      <RecommendationPanel
-        v-if="orderedGroups.length"
-        title="Suggested cleanup"
-        description="Start with the largest storage opportunities. Each group names one suggested copy to keep and the identical copies you can consider deleting."
-      >
-        <div class="recommendation-item">
-          <span class="recommendation-badge exact">Exact file matches</span>
-          <h3>
-            {{ visibleSummary.redundant_copies }} redundant copies to review
-          </h3>
-          <p>
-            Keep one copy per group. Suggested deletions are based on matching
-            recorded SHA-256 hashes and byte sizes; the scan does not reopen the
-            files. Expand a group to review its file names, IDs, and evidence.
-          </p>
-        </div>
-      </RecommendationPanel>
       <EmptyState
         v-if="orderedGroups.length === 0"
         :title="
           route.query.file
             ? 'No duplicates found for this file'
-            : 'No duplicates found'
+            : 'No exact duplicates found'
         "
         :description="
           route.query.file
             ? 'This file is not part of a stored exact-duplicate group.'
             : 'All stored files have distinct content and size combinations.'
         "
-      />
+      >
+        <p style="font-size: 13px; margin: 8px 0 0">
+          Looking for reused slides across decks?
+          <RouterLink :to="{ name: 'slides' }">Open Slide Comparison →</RouterLink>
+        </p>
+      </EmptyState>
       <DuplicateGroup
         v-for="(group, index) in orderedGroups"
         :key="`${group.sha256}-${group.file_size_bytes}`"
@@ -172,11 +154,8 @@ onMounted(scanForDuplicates);
         @resolved="scanForDuplicates"
       />
     </template>
-    <section v-if="resolutions.length" class="cleanup-history">
-      <h2>Cleanup history</h2>
-      <p>
-        Resolved cases stay here. A newly uploaded duplicate opens a new case.
-      </p>
+    <details v-if="resolutions.length" class="cleanup-history">
+      <summary>Cleanup history ({{ resolutions.length }})</summary>
       <article v-for="item in resolutions" :key="item.id">
         <strong
           >{{ item.status === "resolved" ? "Resolved" : "Pending cleanup" }} ·
@@ -184,8 +163,9 @@ onMounted(scanForDuplicates);
         >
         <p>
           {{ item.removed_ids.length }} redundant original records ·
-          {{ item.removed_bytes.toLocaleString() }} confirmed original bytes
-          removed{{ item.measurement_complete ? "" : " (partial measurement)" }}
+          {{ item.removed_bytes.toLocaleString() }} confirmed bytes removed{{
+            item.measurement_complete ? "" : " (partial measurement)"
+          }}
         </p>
         <RouterLink
           :to="{ name: 'files', query: { file: String(item.keeper_id) } }"
@@ -197,23 +177,33 @@ onMounted(scanForDuplicates);
           Verify keeper and finish cleanup
         </button>
       </article>
-    </section>
+    </details>
     <p v-if="cleanupError" class="error" role="alert">{{ cleanupError }}</p>
   </div>
 </template>
 
 <style scoped>
 .cleanup-history {
-  padding: 22px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-top: 20px;
+}
+.cleanup-history summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
 }
 .cleanup-history article {
-  padding: 16px 0;
+  padding: 14px 0 4px;
+  margin-top: 12px;
   border-top: 1px solid #e1e7ef;
 }
 .cleanup-history p {
   font-size: 13px;
   color: #66768c;
-  line-height: 1.7;
+  margin: 4px 0 8px;
 }
 .cleanup-history button {
   margin-left: 12px;

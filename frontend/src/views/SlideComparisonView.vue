@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { RefreshCw } from "@lucide/vue";
+import { computed, nextTick, ref, watch } from "vue";
+import { useRoute, useRouter, RouterLink } from "vue-router";
+import { RefreshCw, FileText, ChartNoAxesColumn } from "@lucide/vue";
 import { usePresentations } from "../composables/usePresentations";
 import type { SlideClassification } from "../types/presentation";
 import SlideComparisonCard from "../components/presentations/SlideComparisonCard.vue";
@@ -30,6 +30,11 @@ const filterOptions = [
   { value: "similar", label: "Similar Slides" },
   { value: "unique", label: "Unique Slides" },
 ] as const;
+const targetSlideNumber = computed(() => {
+  const raw = route.query.page;
+  const num = typeof raw === "string" ? Number(raw) : 0;
+  return Number.isSafeInteger(num) && num > 0 ? num : null;
+});
 const recordsAnalyzed = computed(() =>
   presentations.value.filter((p) => p.status === "completed"),
 );
@@ -57,9 +62,33 @@ watch(
   },
   { immediate: true },
 );
-watch([filter, () => comparison.value], () => {
+watch(filter, () => {
   page.value = 1;
 });
+watch(
+  [() => comparison.value, targetSlideNumber],
+  async ([comp, targetSlide]) => {
+    if (!comp) {
+      page.value = 1;
+      return;
+    }
+    if (targetSlide) {
+      filter.value = "all";
+      const idx = comp.slides.findIndex(
+        (s) => s.slide.slide_number === targetSlide,
+      );
+      if (idx >= 0) {
+        page.value = Math.floor(idx / 6) + 1;
+        await nextTick();
+        const el = document.getElementById(`slide-card-${targetSlide}`);
+        el?.scrollIntoView({ block: "center" });
+        el?.focus({ preventScroll: true });
+        return;
+      }
+    }
+    page.value = 1;
+  },
+);
 function choose(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
   void router.push({ name: "slides", query: { file: value || undefined } });
@@ -76,58 +105,87 @@ function refresh(): void {
       <h1>Slide Comparison</h1>
       <p>Find reused slides across PDF and PowerPoint presentations.</p>
     </div>
-    <button :disabled="loading" @click="refresh">
-      <RefreshCw :size="16" />Refresh results
+    <button :disabled="loading" aria-label="Refresh results" @click="refresh">
+      <RefreshCw :size="16" :class="{ spin: loading }" /><span>Refresh</span>
     </button>
   </div>
   <UploadEntry
-    description="Add PDF or PPTX presentations and choose slide extraction and comparison from one central upload page."
+    v-if="!selected"
+    description="Upload PDF or PPTX presentations to extract and compare slides automatically."
   />
   <p v-if="listError" class="notice error" role="alert">{{ listError }}</p>
   <p v-if="error" class="notice error" role="alert">{{ error }}</p>
-  <section>
-    <label for="selected-presentation">Presentation</label
-    ><select
-      id="selected-presentation"
-      class="presentation-selector"
-      :value="selected?.file_id ?? route.query.file ?? ''"
-      @change="choose"
-    >
-      <option value="">Select a presentation…</option>
-      <option
-        v-for="item in presentations"
-        :key="item.file_id"
-        :value="item.file_id"
+  <section class="selector-panel">
+    <div class="selector-row">
+      <label for="selected-presentation">Presentation</label
+      ><select
+        id="selected-presentation"
+        class="presentation-selector"
+        :value="selected?.file_id ?? route.query.file ?? ''"
+        @change="choose"
       >
-        {{ item.filename }} ·
-        {{ item.status === "not_processed" ? "Not analyzed" : item.status }}
-      </option>
-    </select>
-    <p v-if="loading" class="muted" role="status">Loading analysis…</p>
-    <template v-else-if="selected"
-      ><p class="presentation-state" role="status">
-        {{
-          selected.status === "processing"
-            ? "Rendering and hashing slides…"
-            : selected.status === "queued"
-              ? "Queued for background analysis"
+        <option value="">Select a presentation…</option>
+        <option
+          v-for="item in presentations"
+          :key="item.file_id"
+          :value="item.file_id"
+        >
+          {{ item.filename }} ·
+          {{ item.status === "not_processed" ? "Not analyzed" : item.status }}
+        </option>
+      </select>
+      <template v-if="selected">
+        <RouterLink
+          v-if="selected.filename.toLowerCase().endsWith('.pdf')"
+          class="selector-link-btn"
+          :to="{ name: 'extract', query: { file: String(selected.file_id) } }"
+        >
+          <FileText :size="15" />Open Document Text
+        </RouterLink>
+        <RouterLink
+          v-if="selected.filename.toLowerCase().endsWith('.pdf')"
+          class="selector-link-btn"
+          :to="{ name: 'storage', query: { file: String(selected.file_id) } }"
+        >
+          <ChartNoAxesColumn :size="15" />View Storage Comparison
+        </RouterLink>
+        <button
+          type="button"
+          :class="{
+            'button-primary':
+              selected.status === 'not_processed' ||
+              selected.status === 'failed',
+          }"
+          :disabled="loading"
+          @click="analyze"
+        >
+          <RefreshCw :size="15" :class="{ spin: loading }" />
+          {{
+            selected.status === "failed"
+              ? "Retry Analysis"
               : selected.status === "not_processed"
-                ? "This presentation has not been analyzed yet."
-                : selected.status === "failed"
-                  ? selected.error_message
-                  : `${selected.slide_count} slides analyzed`
-        }}
-      </p>
-      <button
-        v-if="
-          selected.status === 'not_processed' || selected.status === 'failed'
-        "
-        class="button-primary"
-        @click="analyze"
-      >
-        {{ selected.status === "failed" ? "Retry analysis" : "Analyze slides" }}
-      </button></template
-    >
+                ? "Analyze Slides"
+                : "Run or Update"
+          }}
+        </button>
+      </template>
+    </div>
+    <p v-if="loading" class="presentation-state" role="status">
+      Loading analysis…
+    </p>
+    <p v-else-if="selected" class="presentation-state" role="status">
+      {{
+        selected.status === "processing"
+          ? "Rendering and hashing slides…"
+          : selected.status === "queued"
+            ? "Queued for background analysis"
+            : selected.status === "not_processed"
+              ? "This presentation has not been analyzed yet."
+              : selected.status === "failed"
+                ? selected.error_message
+                : `${selected.slide_count} slides analyzed`
+      }}
+    </p>
   </section>
   <div class="slide-kpis">
     <div class="kpi-card">
@@ -145,19 +203,19 @@ function refresh(): void {
     <div class="kpi-card">
       <div>Exact matches</div>
       <strong>{{ comparison?.summary.exact_slides ?? "—" }}</strong><small
-        >Slides in selected presentation</small
+        >In selected presentation</small
       >
     </div>
     <div class="kpi-card">
-      <div>Similar · review required</div>
+      <div>Similar · review</div>
       <strong>{{ comparison?.summary.similar_slides ?? "—" }}</strong><small
-        >Slides in selected presentation</small
+        >In selected presentation</small
       >
     </div>
     <div class="kpi-card">
       <div>Unique slides</div>
       <strong>{{ comparison?.summary.unique_slides ?? "—" }}</strong><small
-        >Slides in selected presentation</small
+        >In selected presentation</small
       >
     </div>
   </div>
@@ -166,46 +224,47 @@ function refresh(): void {
       :comparison="comparison"
       :records="presentations"
     />
-    <h2>Slide-by-slide evidence</h2>
-    <p class="notice">
-      {{ comparison.summary.exact_slides + comparison.summary.similar_slides }}
-      matching slides identified across
-      {{ comparison.summary.matching_presentations }} other presentations. These
-      are potential reuse opportunities; no storage has been reclaimed.
-    </p>
-    <p class="slide-explanation">
-      Similarity is a visual heuristic, not proof of identical information.
-      Threshold: {{ comparison.similarity_threshold }}%. Review changes to
-      numbers, labels and diagrams. Byte savings are unavailable until a
-      concrete replacement strategy exists.
-    </p>
-    <div
-      class="segmented-control slide-filters"
-      role="group"
-      aria-label="Filter slides"
-    >
-      <button
-        v-for="option in filterOptions"
-        :key="option.value"
-        :class="{ active: filter === option.value }"
-        :aria-pressed="filter === option.value"
-        @click="filter = option.value"
+    <div class="slides-toolbar">
+      <div>
+        <h2>Slide-by-slide comparison</h2>
+        <p class="slide-explanation">
+          {{
+            comparison.summary.exact_slides + comparison.summary.similar_slides
+          }}
+          matching slides across
+          {{ comparison.summary.matching_presentations }} other decks (threshold:
+          {{ comparison.similarity_threshold }}%). Review wording and numbers
+          before removing slides.
+        </p>
+      </div>
+      <div
+        class="segmented-control slide-filters"
+        role="group"
+        aria-label="Filter slides"
       >
-        {{ option.label }}
-      </button>
+        <button
+          v-for="option in filterOptions"
+          :key="option.value"
+          :class="{ active: filter === option.value }"
+          :aria-pressed="filter === option.value"
+          @click="filter = option.value"
+        >
+          {{ option.label }}
+        </button>
+      </div>
     </div>
-    <p class="muted">{{ filtered.length }} slides in this view</p>
     <SlideComparisonCard
       v-for="result in visible"
       :key="result.slide.id"
       :result="result"
+      :highlighted="result.slide.slide_number === targetSlideNumber"
     /><EmptyState
       v-if="!filtered.length"
       title="No slides in this category"
       description="Choose another filter to inspect the presentation."
     />
-    <footer class="pagination">
-      <span>Page {{ page }} of {{ pageCount }}</span>
+    <footer v-if="filtered.length" class="pagination">
+      <span>Page {{ page }} of {{ pageCount }} ({{ filtered.length }} slides)</span>
       <div>
         <button :disabled="page <= 1" @click="page--">Previous</button
         ><button :disabled="page >= pageCount" @click="page++">Next</button>
@@ -215,34 +274,70 @@ function refresh(): void {
   <EmptyState
     v-else-if="!selected && !loading"
     title="Compare your presentations"
-    description="Upload a presentation or select an existing PDF to analyze its slides."
+    description="Select an existing PDF or PPTX presentation above to inspect its slides."
   />
 </template>
 <style scoped>
+.selector-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.selector-row label {
+  margin: 0;
+  font-weight: 600;
+}
 .presentation-selector {
-  width: 100%;
+  flex: 1;
+  min-width: 220px;
+}
+.selector-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 5px;
+  border: 1px solid #d7dee8;
+  background: #fff;
+  color: #33445b;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.selector-link-btn:hover {
+  background: #f1f5fa;
+  border-color: #b5c7da;
+  text-decoration: none;
 }
 .presentation-state {
-  margin: 14px 0 0;
+  margin: 10px 0 0;
   color: #66768c;
   font-size: 13px;
-}
-.presentation-state + button {
-  margin-top: 12px;
 }
 .slide-kpis {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
-  margin-bottom: 22px;
+  margin-bottom: 20px;
+}
+.slides-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 20px 0 14px;
+}
+.slides-toolbar h2 {
+  margin: 0 0 4px;
 }
 .slide-explanation {
   font-size: 12px;
   color: #66768c;
-  line-height: 1.7;
+  margin: 0;
 }
 .slide-filters {
-  margin: 10px 0 16px;
   flex-wrap: wrap;
 }
 .slide-kpis .kpi-card strong {

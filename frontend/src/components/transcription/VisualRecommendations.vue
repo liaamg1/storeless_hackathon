@@ -85,12 +85,11 @@ function percent(value: number): string {
     </template>
     <div class="recommendation-list">
       <article class="recommendation-item">
-        <span class="recommendation-badge">1 · Download and check</span>
-        <h3>Keep a readable copy with the important visuals</h3>
+        <span class="recommendation-badge">1 · Export document</span>
+        <h3>Keep a readable copy with key visuals</h3>
         <p>
-          Open the exported document and check that the images and spoken text
-          you need are included. Unmatched speech and visuals shown during
-          silence remain in the document.
+          Export the offline HTML document and verify that the images and spoken
+          text you need are included.
         </p>
         <button :disabled="downloading" @click="$emit('download')">
           {{
@@ -124,22 +123,15 @@ function percent(value: number): string {
           <p>
             Consider replacing
             <span class="recommendation-file">{{ transcript.filename }}</span>
-            only after verifying and keeping the downloaded document, and
-            confirming you no longer need the recording's audio, motion, or
-            full-resolution screens. This is a storage recommendation, not a
-            duplicate-content score.
-          </p>
-          <p class="muted">
-            Measurements use the actual download, including HTML encoding and
-            formatting with timestamps off.
+            only after verifying the downloaded HTML document and confirming you
+            no longer need the original audio or video.
           </p>
         </template>
         <template v-else-if="storage?.status === 'completed'"
-          ><h3>The measured output does not save storage</h3>
+          ><h3>No storage savings measured</h3>
           <p>
-            Keep the original if storage reduction is your only goal. The
-            generated text and images are the same size or larger; the readable
-            document remains available.
+            The exported text and images are the same size or larger than the
+            original MP4.
           </p></template
         >
         <template v-else
@@ -161,8 +153,8 @@ function percent(value: number): string {
         <h3>
           {{
             overview.reusedImages
-              ? "Repeated visuals already share image files"
-              : "Keep the extracted visuals"
+              ? "Repeated visuals share image files"
+              : "Distinct visuals preserved"
           }}
         </h3>
         <p v-if="overview.reusedImages">
@@ -170,14 +162,13 @@ function percent(value: number): string {
           {{
             overview.reusedImages === 1 ? "interval reuses" : "intervals reuse"
           }}
-          existing image files. No extra image deletion is needed. Keep the
-          associated speech for each occurrence.
+          existing image files automatically.
         </p>
         <p v-else>
           {{
             overview.uniqueImages
-              ? "Each saved visual is used by the document. No redundant saved image was identified in these results."
-              : "No useful visual was detected. Keep the speech transcript as the readable representation."
+              ? "Each saved visual is distinct and used by the document."
+              : "No distinct visual was detected; keep the speech transcript."
           }}
         </p>
       </article>

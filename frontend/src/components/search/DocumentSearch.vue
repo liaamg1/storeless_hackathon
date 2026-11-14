@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { useFileUpdates } from "../../composables/useFileUpdates";
 import { fetchDocumentSearchResults } from "../../services/search";
 import type { SearchResponse } from "../../types/search";
@@ -10,8 +11,14 @@ defineEmits<{
   openSegment: [fileId: number, segmentId: number, visual?: boolean];
 }>();
 
-const query = ref("");
-const filter = ref<"all" | "pdf" | "video">("all");
+const route = useRoute();
+const router = useRouter();
+const query = ref(typeof route.query.q === "string" ? route.query.q : "");
+const filter = ref<"all" | "pdf" | "video">(
+  route.query.type === "pdf" || route.query.type === "video"
+    ? route.query.type
+    : "all",
+);
 const filteredResponse = computed(() => {
   if (!response.value) return null;
   const results = response.value.results.filter(
@@ -39,8 +46,26 @@ function cancelPendingSearch(): void {
   controller = null;
 }
 
-async function searchDocuments(): Promise<void> {
+function syncRouteQuery(): void {
+  const nextQuery: Record<string, string> = {};
+  if (normalizedQuery.value) nextQuery.q = normalizedQuery.value;
+  if (filter.value !== "all") nextQuery.type = filter.value;
+  if (
+    (route.query.q ?? undefined) !== nextQuery.q ||
+    (route.query.type ?? undefined) !== nextQuery.type
+  ) {
+    void router.replace({ name: "search", query: nextQuery });
+  }
+}
+
+function setFilter(next: "all" | "pdf" | "video"): void {
+  filter.value = next;
+  syncRouteQuery();
+}
+
+async function searchDocuments(syncUrl = true): Promise<void> {
   if (!canSearch.value) return;
+  if (syncUrl) syncRouteQuery();
   cancelPendingSearch();
   const version = requestVersion;
   controller = new AbortController();
@@ -69,13 +94,32 @@ async function searchDocuments(): Promise<void> {
 function clearSearch(): void {
   cancelPendingSearch();
   query.value = "";
+  filter.value = "all";
   response.value = null;
   error.value = "";
   loading.value = false;
+  if (route.query.q || route.query.type) {
+    void router.replace({ name: "search", query: {} });
+  }
 }
 
+watch(
+  () => [route.query.q, route.query.type],
+  ([q, type]) => {
+    filter.value = type === "pdf" || type === "video" ? type : "all";
+    const routeQ = typeof q === "string" ? q : "";
+    if (routeQ && routeQ !== response.value?.query) {
+      query.value = routeQ;
+      void searchDocuments(false);
+    } else if (!routeQ && response.value) {
+      response.value = null;
+    }
+  },
+  { immediate: true },
+);
+
 useFileUpdates(() => {
-  if (response.value) return searchDocuments();
+  if (response.value) return searchDocuments(false);
 });
 onBeforeUnmount(cancelPendingSearch);
 </script>
@@ -85,14 +129,14 @@ onBeforeUnmount(cancelPendingSearch);
     <div>
       <p class="eyebrow">Workspace</p>
       <h1>Search</h1>
-      <p>Find the knowledge inside your documents and recordings.</p>
+      <p>Find the knowledge inside your documents, slides, and recordings.</p>
     </div>
   </div>
   <section aria-labelledby="search-heading" class="search-page-section">
     <h2 id="search-heading">Search your content</h2>
-    <form @submit.prevent="searchDocuments">
+    <form @submit.prevent="searchDocuments(true)">
       <label for="document-search"
-        >Search document text and video transcripts</label
+        >Search PDFs, presentations, and video transcripts</label
       >
       <div class="search-controls">
         <input
@@ -111,11 +155,13 @@ onBeforeUnmount(cancelPendingSearch);
         >
           {{ loading ? "Searching…" : "Search" }}
         </button>
-        <button type="button" @click="clearSearch">Clear</button>
+        <button v-if="query || response" type="button" @click="clearSearch">
+          Clear
+        </button>
       </div>
       <p id="search-help">
         Use words, "quoted phrases", OR, or -excluded terms. Shows up to 20
-        matching pages or transcript segments.
+        matching pages, slides, or transcript segments.
       </p>
     </form>
     <div class="search-filter-row">
@@ -127,20 +173,21 @@ onBeforeUnmount(cancelPendingSearch);
         <button
           v-for="option in [
             ['all', 'All'],
-            ['pdf', 'Documents'],
+            ['pdf', 'Documents & slides'],
             ['video', 'Recordings'],
           ] as const"
           :key="option[0]"
+          type="button"
           :class="{ active: filter === option[0] }"
           :aria-pressed="filter === option[0]"
-          @click="filter = option[0]"
+          @click="setFilter(option[0])"
         >
           {{ option[1] }}
         </button>
       </div>
       <span v-if="response" class="muted"
         >{{ filteredResponse?.returned_count }} of
-        {{ response.returned_count }} returned matches</span
+        {{ response.returned_count }} matches</span
       >
     </div>
     <p v-if="loading" role="status">Searching documents and recordings...</p>
@@ -161,7 +208,8 @@ onBeforeUnmount(cancelPendingSearch);
       Filters apply to the current set of up to 20 returned matches.
     </p>
     <p v-if="!response && !loading && !error" class="search-start">
-      Enter a query to search your saved PDF text and video transcripts.
+      Enter a query to search your saved PDF pages, PowerPoint slides, and video
+      transcripts.
     </p>
   </section>
 </template>

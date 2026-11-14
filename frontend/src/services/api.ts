@@ -3,14 +3,28 @@ import type { DocumentDetails, UploadResult } from "../types/document";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+export function extractErrorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== "object") return fallback;
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  if (Array.isArray(detail) && detail.length > 0) {
+    const first = detail[0] as { msg?: unknown } | undefined;
+    if (typeof first?.msg === "string" && first.msg.trim()) return first.msg;
+  }
+  return fallback;
+}
+
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, options);
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    const message = typeof body?.detail === "string"
-      ? body.detail
-      : `Request failed (${response.status}).`;
-    throw new Error(message);
+    throw new Error(
+      extractErrorMessage(body, `Request failed (${response.status}).`),
+    );
   }
   return response.json() as Promise<T>;
 }

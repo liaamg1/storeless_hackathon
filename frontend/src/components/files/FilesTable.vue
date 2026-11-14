@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { RouterLink } from "vue-router";
 import {
   FileText,
   Video,
@@ -8,7 +9,7 @@ import {
   Ellipsis,
 } from "@lucide/vue";
 import type { WorkspaceFile } from "../../utils/files";
-import { formatDate } from "../../utils/files";
+import { fileDestination, formatDate } from "../../utils/files";
 import { formatBytes } from "../../utils/formatBytes";
 import FileProgress from "../shared/FileProgress.vue";
 import { processingStepLabel } from "../../utils/upload";
@@ -73,35 +74,73 @@ defineEmits<{ select: [fileId: number] }>();
           <td class="nowrap">{{ formatBytes(file.size_bytes) }}</td>
           <td>
             <StatusBadge :status="file.status" /><FileProgress
-              v-if="
-                file.processing ||
-                ['queued', 'processing', 'failed', 'completed'].includes(
-                  file.status,
-                )
-              "
+              v-if="['queued', 'processing'].includes(file.status)"
               compact
               :status="file.status"
               :percent="file.processing?.progress_percent"
               :step="
-                processingStepLabel(
-                  file.processing?.current_step ??
-                    (file.status === 'completed' ? 'completed' : file.status),
-                )
+                processingStepLabel(file.processing?.current_step ?? file.status)
               "
             />
           </td>
           <td class="date-column nowrap">{{ formatDate(file.uploaded_at) }}</td>
           <td>
-            <button
-              class="icon-button"
-              :aria-label="`Details for ${file.filename}`"
-              @click="$emit('select', file.id)"
-            >
-              <Ellipsis :size="18" />
-            </button>
+            <div class="table-row-actions">
+              <RouterLink
+                v-if="file.type !== 'other'"
+                class="row-open-link"
+                :to="
+                  file.type === 'pdf'
+                    ? { name: 'extract', query: { file: String(file.id) } }
+                    : fileDestination(file)
+                "
+              >
+                {{
+                  file.type === "video"
+                    ? "Open Transcript"
+                    : file.type === "pdf"
+                      ? "Open Text"
+                      : "Compare Slides"
+                }}
+              </RouterLink>
+              <button
+                type="button"
+                class="icon-button"
+                :aria-label="`Details for ${file.filename}`"
+                title="File details & all actions"
+                @click="$emit('select', file.id)"
+              >
+                <Ellipsis :size="18" />
+              </button>
+            </div>
           </td>
         </tr>
       </tbody>
     </table>
   </div>
 </template>
+<style scoped>
+.table-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.row-open-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 5px;
+  border: 1px solid #d7dee8;
+  background: #fff;
+  color: #175ac6;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.row-open-link:hover {
+  background: #f1f5fa;
+  border-color: #b5c7da;
+  text-decoration: none;
+}
+</style>

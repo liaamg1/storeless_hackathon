@@ -13,14 +13,14 @@ defineEmits<{ menu: []; upload: [] }>();
         @click="$emit('menu')"
       >
         <Menu :size="20" /></button
-      ><span class="breadcrumb-root">Workspace</span
+      ><RouterLink :to="{ name: 'upload' }" class="breadcrumb-root"
+        >Workspace</RouterLink
       ><ChevronRight :size="14" class="breadcrumb-root" /><strong>{{
         route.meta.title || "ReStore"
       }}</strong>
     </div>
     <div class="header-actions">
-      <span class="demo-tag">Hackathon demo</span
-      ><RouterLink
+      <RouterLink
         class="header-search"
         :to="{ name: 'search' }"
         aria-label="Search files and content"

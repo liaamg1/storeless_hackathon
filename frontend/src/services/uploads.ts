@@ -1,4 +1,4 @@
-import { API_URL, request } from "./api";
+import { API_URL, extractErrorMessage, request } from "./api";
 import type { Operation, ProcessingFile, UploadLimits } from "../types/upload";
 export const getUploadLimits = () => request<UploadLimits>("/uploads/limits");
 export const getProcessingFiles = () => request<ProcessingFile[]>("/uploads");
@@ -28,7 +28,7 @@ export function uploadAndProcess(
       );
     upload.onabort = () => reject(new Error("Upload cancelled."));
     upload.onload = () => {
-      let result;
+      let result: unknown;
       try {
         result = JSON.parse(upload.responseText);
       } catch {
@@ -37,13 +37,12 @@ export function uploadAndProcess(
         );
         return;
       }
-      if (upload.status >= 200 && upload.status < 300) resolve(result);
+      if (upload.status >= 200 && upload.status < 300)
+        resolve(result as ProcessingFile);
       else
         reject(
           new Error(
-            typeof result?.detail === "string"
-              ? result.detail
-              : `Upload failed (${upload.status}).`,
+            extractErrorMessage(result, `Upload failed (${upload.status}).`),
           ),
         );
     };

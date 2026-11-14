@@ -70,27 +70,17 @@ async function resolve() {
       >
     </summary>
     <div class="duplicate-group-body">
-      <div v-if="recommendation" class="duplicate-advice">
-        <p>
-          <strong>Suggested keeper:</strong> {{ recommendation.keep.filename }}
-          <small>(File #{{ recommendation.keep.id }})</small>
-        </p>
-        <p>
-          <strong>Suggested deletion:</strong>
-          {{ recommendation.remove.length }} duplicate
-          {{ recommendation.remove.length === 1 ? "copy" : "copies" }} listed
-          below.
-        </p>
-        <p class="muted">
-          All copies have the same recorded SHA-256 and byte size. Completed
-          processing results are preferred when suggesting a keeper, followed by
-          the earliest upload. Review filenames, linked processing results, and
-          any links you rely on before removing a copy. Identical uploads can
-          have different processing results.
-        </p>
-      </div>
       <div class="cleanup-review">
-        <h4>Choose a copy to keep</h4>
+        <div class="cleanup-review-header">
+          <div>
+            <h4>Choose a copy to keep</h4>
+            <p v-if="recommendation" class="muted" style="margin: 2px 0 10px">
+              Suggested keeper: <strong>{{ recommendation.keep.filename }}</strong> (File #{{
+                recommendation.keep.id
+              }}) — prefers completed analysis, then earliest upload.
+            </p>
+          </div>
+        </div>
         <label :for="`keeper-${groupNumber}`">Retained copy</label
         ><select
           :id="`keeper-${groupNumber}`"
@@ -102,16 +92,16 @@ async function resolve() {
             }}{{ file.completed_operations?.length ? " · Analysis ready" : "" }}
           </option>
         </select>
-        <p>
-          Only redundant original uploads are removed. Searchable text, derived
-          images and metadata remain. The retained copy is verified from its
-          actual bytes before cleanup.
-        </p>
         <label class="cleanup-confirm"
           ><input v-model="confirmation" type="checkbox" :disabled="busy" />I
-          confirm removal of the other {{ group.files.length - 1 }} original
-          copies and will keep File #{{ keeperId }}.</label
-        ><button :disabled="!confirmation || busy" @click="resolve">
+          confirm removal of the other {{ group.files.length - 1 }} identical
+          {{ group.files.length - 1 === 1 ? "copy" : "copies" }} and will keep
+          File #{{ keeperId }} (derived text and images remain).</label
+        ><button
+          class="button-primary"
+          :disabled="!confirmation || busy"
+          @click="resolve"
+        >
           {{
             busy
               ? "Verifying and cleaning up…"

@@ -243,12 +243,6 @@ watch(
           </li>
         </ol>
       </details>
-      <VisualRecommendations
-        v-if="result.status === 'completed'"
-        :transcript="result"
-        :downloading="downloading"
-        @download="saveDocument"
-      />
       <slot v-if="!hasVisuals" />
       <template v-else>
         <article
@@ -330,6 +324,12 @@ watch(
           </p>
         </article>
       </template>
+      <VisualRecommendations
+        v-if="result.status === 'completed'"
+        :transcript="result"
+        :downloading="downloading"
+        @download="saveDocument"
+      />
     </template>
   </section>
 </template>

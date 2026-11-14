@@ -3,10 +3,12 @@ import {
   Search,
   RefreshCw,
   Video,
+  ChartNoAxesColumn,
   ChevronLeft,
   ChevronRight,
 } from "@lucide/vue";
 import { formatDate } from "../utils/files";
+import { formatBytes } from "../utils/formatBytes";
 import { formatTimestamp } from "../utils/formatTimestamp";
 import StatusBadge from "../components/shared/StatusBadge.vue";
 import EmptyState from "../components/shared/EmptyState.vue";
@@ -32,8 +34,10 @@ const {
   job,
   transcript,
   loadingStatus,
+  updatingVideo,
   statusError,
   selectVideo,
+  runOrUpdateVideo,
   clearSelection,
 } = useTranscription();
 useFileUpdates(async () => {
@@ -81,22 +85,60 @@ const readingMode = ref<"transcript" | "visual">("transcript");
 const visualStatus = ref("");
 const showTimestamps = ref(false);
 const downloadError = ref("");
+const updateFeedback = ref("");
+
+function setReadingMode(mode: "transcript" | "visual"): void {
+  readingMode.value = mode;
+  if (route.query.file) {
+    const nextQuery: Record<string, string> = {
+      file: String(route.query.file),
+    };
+    if (mode === "visual") nextQuery.view = "visual";
+    if (typeof route.query.segment === "string")
+      nextQuery.segment = route.query.segment;
+    void router.replace({ name: "transcription", query: nextQuery });
+  }
+}
 
 watch(
-  () => route.query.file,
-  (value) => {
-    downloadError.value = "";
-    readingMode.value = route.query.view === "visual" ? "visual" : "transcript";
-    visualStatus.value = "";
-    const fileId = typeof value === "string" ? Number(value) : 0;
-    if (Number.isSafeInteger(fileId) && fileId > 0) void selectVideo(fileId);
-    else clearSelection();
+  () => [route.query.file, route.query.view],
+  ([value, view], [oldValue]) => {
+    readingMode.value = view === "visual" ? "visual" : "transcript";
+    if (value !== oldValue) {
+      downloadError.value = "";
+      visualStatus.value = "";
+      updateFeedback.value = "";
+      const fileId = typeof value === "string" ? Number(value) : 0;
+      if (Number.isSafeInteger(fileId) && fileId > 0) void selectVideo(fileId);
+      else clearSelection();
+    }
   },
   { immediate: true },
 );
 
-function openRecording(fileId: number): void {
-  void router.push({ name: "transcription", query: { file: String(fileId) } });
+function openRecording(fileId: number, view?: "visual"): void {
+  void router.push({
+    name: "transcription",
+    query: { file: String(fileId), ...(view ? { view } : {}) },
+  });
+}
+
+function openStorageComparison(fileId: number): void {
+  void router.push({
+    name: "storage",
+    query: { file: String(fileId) },
+  });
+}
+
+async function handleRunOrUpdate(fileId?: number): Promise<void> {
+  const targetId =
+    fileId ?? selectedVideo.value?.file_id ?? Number(route.query.file);
+  if (!Number.isSafeInteger(targetId) || targetId <= 0) return;
+  updateFeedback.value = "";
+  await runOrUpdateVideo(targetId);
+  if (!statusError.value) {
+    updateFeedback.value = "Analysis refreshed for this recording.";
+  }
 }
 
 function retryStatus(): void {
@@ -137,13 +179,90 @@ async function saveTranscript(): Promise<void> {
       </div>
     </div>
     <UploadEntry
-      description="Add MP4 recordings once, then choose transcription, optional visuals and storage comparison in Upload Files."
+      v-if="!selectedVideo"
+      description="Upload MP4 recordings in the workspace to transcribe speech and extract visual screen content."
     />
     <p v-if="loadingStatus" role="status">Loading processing status...</p>
-    <div v-if="statusError">
+    <div v-if="statusError" class="status-error-box">
       <p class="error" role="alert">{{ statusError }}</p>
-      <button type="button" @click="retryStatus">Retry status</button>
+      <div class="recording-action-buttons">
+        <button type="button" @click="retryStatus">Retry status</button>
+        <button
+          v-if="route.query.file"
+          type="button"
+          class="button-primary"
+          :disabled="updatingVideo"
+          @click="handleRunOrUpdate()"
+        >
+          <RefreshCw :size="15" :class="{ spin: updatingVideo }" />
+          {{ updatingVideo ? "Running…" : "Run or Update" }}
+        </button>
+      </div>
     </div>
+
+    <section v-if="selectedVideo" class="selected-recording-bar">
+      <div class="selected-recording-info">
+        <span class="file-type-icon video"><Video :size="20" /></span>
+        <div>
+          <h2>{{ selectedVideo.filename }}</h2>
+          <p class="muted" style="font-size: 12px; margin: 2px 0 0">
+            {{ formatBytes(selectedVideo.size_bytes) }} ·
+            {{
+              selectedVideo.duration_ms == null
+                ? "Unknown duration"
+                : formatTimestamp(selectedVideo.duration_ms).split(".")[0]
+            }}
+            · File #{{ selectedVideo.file_id }}
+          </p>
+        </div>
+        <StatusBadge :status="job?.status ?? selectedVideo.status" />
+      </div>
+      <div class="recording-action-buttons">
+        <button
+          type="button"
+          :class="{ 'button-primary': readingMode === 'transcript' }"
+          @click="setReadingMode('transcript')"
+        >
+          Open Transcript
+        </button>
+        <button
+          type="button"
+          :class="{ 'button-primary': readingMode === 'visual' }"
+          @click="setReadingMode('visual')"
+        >
+          Visual Transcript
+        </button>
+        <button
+          type="button"
+          @click="openStorageComparison(selectedVideo.file_id)"
+        >
+          <ChartNoAxesColumn :size="15" />View Storage Comparison
+        </button>
+        <button
+          type="button"
+          :disabled="updatingVideo"
+          @click="handleRunOrUpdate(selectedVideo.file_id)"
+        >
+          <RefreshCw :size="15" :class="{ spin: updatingVideo }" />
+          {{
+            updatingVideo
+              ? "Running…"
+              : job?.status === "failed"
+                ? "Retry Analysis"
+                : "Run or Update"
+          }}
+        </button>
+      </div>
+      <p
+        v-if="updateFeedback"
+        class="notice"
+        role="status"
+        style="margin: 12px 0 0"
+      >
+        {{ updateFeedback }}
+      </p>
+    </section>
+
     <details
       v-if="selectedVideo && job"
       class="processing-summary"
@@ -152,25 +271,6 @@ async function saveTranscript(): Promise<void> {
       <summary>Processing status <StatusBadge :status="job.status" /></summary>
       <TranscriptionProgress :video="selectedVideo" :job="job" />
     </details>
-    <div
-      v-if="transcript"
-      class="transcript-modes"
-      role="group"
-      aria-label="Transcript viewing mode"
-    >
-      <button
-        :aria-pressed="readingMode === 'transcript'"
-        @click="readingMode = 'transcript'"
-      >
-        Transcript
-      </button>
-      <button
-        :aria-pressed="readingMode === 'visual'"
-        @click="readingMode = 'visual'"
-      >
-        Visual Transcript
-      </button>
-    </div>
     <VisualTranscriptViewer
       v-if="transcript && readingMode === 'visual'"
       v-model:show-timestamps="showTimestamps"
@@ -277,13 +377,31 @@ async function saveTranscript(): Promise<void> {
                 {{ formatDate(recording.uploaded_at) }}
               </td>
               <td>
-                <button @click="openRecording(recording.file_id)">
-                  {{
-                    recording.status === "completed"
-                      ? "Open transcript"
-                      : "View status"
-                  }}
-                </button>
+                <div class="recording-row-actions">
+                  <button
+                    type="button"
+                    @click="openRecording(recording.file_id)"
+                  >
+                    {{
+                      recording.status === "completed"
+                        ? "Open Transcript"
+                        : "View Status"
+                    }}
+                  </button>
+                  <button
+                    type="button"
+                    @click="openStorageComparison(recording.file_id)"
+                  >
+                    View Storage Comparison
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="updatingVideo"
+                    @click="handleRunOrUpdate(recording.file_id)"
+                  >
+                    Run or Update
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -314,15 +432,42 @@ async function saveTranscript(): Promise<void> {
 </template>
 
 <style scoped>
-.transcript-modes {
+.selected-recording-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+}
+.selected-recording-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.selected-recording-info > div {
+  flex: 1;
+  min-width: 160px;
+}
+.selected-recording-info h2 {
+  margin: 0;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.recording-action-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 24px 0 12px;
 }
-.transcript-modes button[aria-pressed="true"] {
-  background: #175ac6;
-  border-color: #175ac6;
-  color: white;
+.recording-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.status-error-box {
+  background: #fff1f0;
+  border: 1px solid #f5d4d0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
 }
 </style>

@@ -1,41 +1,96 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
-import { FileText, Video, Presentation } from "@lucide/vue";
+import { FileText, Video, Presentation, RefreshCw } from "@lucide/vue";
 import type { ProcessingFile } from "../../types/upload";
-import { operationLabel, processingStepLabel } from "../../utils/upload";
+import {
+  operationLabel,
+  processingStepLabel,
+  recommendedOperations,
+} from "../../utils/upload";
+import { processStoredFile } from "../../services/uploads";
+import { notifyFilesChanged } from "../../utils/fileUpdates";
 import { formatBytes } from "../../utils/formatBytes";
 import FileProgress from "../shared/FileProgress.vue";
 import StatusBadge from "../shared/StatusBadge.vue";
+
 const props = defineProps<{ file: ProcessingFile; detail?: boolean }>();
+const emit = defineEmits<{ updated: [file: ProcessingFile] }>();
+const retrying = ref(false);
+const retryError = ref("");
+
 const completed = (operation: string) =>
   props.file.steps.some(
     (step) => step.operation === operation && step.status === "completed",
   );
+const needsMoreChecks = computed(() =>
+  recommendedOperations(props.file.file_type).some(
+    (op) => !props.file.operations.includes(op),
+  ),
+);
 const links = computed(() => {
   const query = { file: String(props.file.file_id) };
   const result = [];
-  if (completed("transcribe"))
-    result.push({ label: "Transcript", to: { name: "transcription", query } });
-  if (completed("visuals"))
+  if (props.file.file_type === "video") {
     result.push({
-      label: "Visual transcript and images",
-      to: { name: "transcription", query: { ...query, view: "visual" } },
+      label: "Open Transcript",
+      to: { name: "transcription", query },
     });
-  if (completed("slides"))
+    if (completed("visuals"))
+      result.push({
+        label: "Visual Transcript",
+        to: { name: "transcription", query: { ...query, view: "visual" } },
+      });
     result.push({
-      label: "Open slides",
+      label: "View Storage Comparison",
+      to: { name: "storage", query },
+    });
+  } else if (props.file.file_type === "pdf") {
+    result.push({
+      label: "Open Document Text",
+      to: { name: "extract", query },
+    });
+    if (completed("slides"))
+      result.push({
+        label: "Compare Slides",
+        to: { name: "slides", query },
+      });
+    result.push({
+      label: "View Storage Comparison",
+      to: { name: "storage", query },
+    });
+  } else if (props.file.file_type === "pptx") {
+    result.push({
+      label: "Compare Slides",
       to: { name: "slides", query },
     });
-  if (completed("storage"))
-    result.push({ label: "Storage savings", to: { name: "storage", query } });
+  }
   if (completed("duplicates"))
     result.push({
-      label: "Review duplicate cleanup",
+      label: "Duplicates",
       to: { name: "duplicates", query },
     });
   return result;
 });
+
+async function runOrRetry(): Promise<void> {
+  if (retrying.value) return;
+  retrying.value = true;
+  retryError.value = "";
+  try {
+    const updated = await processStoredFile(
+      props.file.file_id,
+      recommendedOperations(props.file.file_type),
+    );
+    notifyFilesChanged();
+    emit("updated", updated);
+  } catch (error) {
+    retryError.value =
+      error instanceof Error ? error.message : "Could not run analysis.";
+  } finally {
+    retrying.value = false;
+  }
+}
 </script>
 <template>
   <article
@@ -66,6 +121,7 @@ const links = computed(() => {
       <StatusBadge :status="file.status" />
     </header>
     <FileProgress
+      v-if="file.status !== 'completed'"
       :status="file.status"
       :percent="file.progress_percent"
       :step="
@@ -74,8 +130,8 @@ const links = computed(() => {
           : processingStepLabel(file.current_step)
       "
     />
-    <details>
-      <summary>Analysis details · {{ file.steps.length }} checks</summary>
+    <details class="step-details" :open="detail || file.status === 'failed'">
+      <summary>Analysis steps ({{ file.steps.length }})</summary>
       <ol class="operation-progress">
         <li v-for="step in file.steps" :key="step.operation">
           <span class="operation-state" :class="step.status">{{
@@ -104,50 +160,46 @@ const links = computed(() => {
         </li>
       </ol>
     </details>
-    <div v-if="links.length" class="processing-results">
+    <p v-if="retryError" class="error" role="alert" style="margin-top: 8px">
+      {{ retryError }}
+    </p>
+    <div v-if="!detail" class="processing-results">
       <RouterLink
-        v-if="!detail"
         class="primary-result"
         :to="{ name: 'files', query: { file: String(file.file_id) } }"
-        >View Results</RouterLink
-      ><RouterLink v-for="link in links" :key="link.label" :to="link.to">{{
+        >File Details</RouterLink
+      >
+      <RouterLink v-for="link in links" :key="link.label" :to="link.to">{{
         link.label
       }}</RouterLink>
-    </div>
-    <p v-else class="muted">
-      Results appear here when the backend confirms completion.
-    </p>
-    <details v-if="completed('pdf_text')" class="text-version">
-      <summary>Text version (optional)</summary>
-      <RouterLink
-        :to="{ name: 'extract', query: { file: String(file.file_id) } }"
-        >Read searchable document text</RouterLink
+      <button
+        type="button"
+        class="inline-retry-button"
+        :disabled="retrying"
+        @click="runOrRetry"
       >
-    </details>
-    <RouterLink
-      v-if="file.status === 'failed'"
-      :to="{ name: 'upload', query: { file: String(file.file_id) } }"
-      >Retry processing stored file</RouterLink
-    >
+        <RefreshCw :size="13" :class="{ spin: retrying }" />
+        {{
+          retrying
+            ? "Running…"
+            : file.status === "failed"
+              ? "Retry Analysis"
+              : needsMoreChecks
+                ? "Complete Analysis"
+                : "Run or Update"
+        }}
+      </button>
+    </div>
   </article>
 </template>
 <style scoped>
-.text-version {
-  margin-top: 16px;
-  font-size: 12px;
-  color: #66768c;
-}
-.text-version a {
-  display: inline-block;
-  margin-top: 10px;
-}
 .processing-file-card {
-  padding: 20px;
+  padding: 16px 18px;
   border: 1px solid #dce5ef;
   border-radius: 10px;
   background: white;
   min-width: 0;
-  margin: 14px 0;
+  margin: 12px 0;
 }
 header {
   display: flex;
@@ -160,7 +212,7 @@ header > div {
   min-width: 120px;
 }
 h3 {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   font-size: 14px;
   overflow-wrap: anywhere;
 }
@@ -169,15 +221,21 @@ header p {
   color: #66768c;
   margin: 0;
 }
-.processing-current {
+.step-details {
+  margin-top: 10px;
+  font-size: 12px;
   color: #53677f;
-  font-size: 13px;
+}
+.step-details summary {
+  cursor: pointer;
+  font-weight: 500;
 }
 .operation-progress {
   list-style: none;
   padding: 0;
+  margin: 10px 0 0;
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 .operation-progress li {
   display: flex;
@@ -187,6 +245,7 @@ header p {
 .operation-progress strong {
   font-size: 12px;
   font-weight: 500;
+  color: #18283d;
 }
 .operation-progress small {
   display: block;
@@ -195,7 +254,7 @@ header p {
 }
 .operation-progress .error {
   font-size: 12px;
-  margin: 5px 0;
+  margin: 4px 0 0;
 }
 .operation-state {
   color: #66768c;
@@ -214,13 +273,22 @@ header p {
 }
 .processing-results {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 10px 16px;
+  gap: 8px 14px;
   border-top: 1px solid #e1e7ef;
-  padding-top: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
   font-size: 12px;
 }
-.primary-result {
+.primary-result,
+.retry-link {
   font-weight: 600;
+}
+.inline-retry-button {
+  min-height: 26px;
+  padding: 4px 10px;
+  font-size: 12px;
+  margin-left: auto;
 }
 </style>

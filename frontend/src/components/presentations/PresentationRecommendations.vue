@@ -79,27 +79,16 @@ const score = (value: number) =>
           >
         </div>
         <p v-if="item.action === 'review_overlap'">
-          This pair provides additional overlap evidence. Follow the
-          higher-priority keep/removal recommendation above; this comparison
-          adds no further deletion candidate.
+          Additional overlap evidence; follow the higher-priority recommendation above.
         </p>
         <p v-else-if="item.basis === 'exact'">
-          Every slide in the proposed removal candidate has an exact normalized
-          rendering and text match in the proposed retained presentation. Review
-          slide order, repeated slides, notes, animations, and attachments
-          before deciding to remove it. This is not a byte-identical file match.
+          All slides in the removal candidate have an exact normalized image and text match in the retained deck. Verify slide order and notes before deleting.
         </p>
         <p v-else-if="item.basis === 'similar'">
-          Every slide in the proposed removal candidate has a match in the
-          proposed retained presentation, with an average visual score of at
-          least 95%. Compare text, numbers, diagrams and presentation notes
-          before treating the content as interchangeable.
+          All slides in the removal candidate match the retained deck (≥95% average visual score). Verify wording, numbers, and diagrams before deleting.
         </p>
         <p v-else>
-          Only part of a presentation is covered by the other deck. Retain the
-          unmatched content and review its {{ item.matchedSlides }} matching
-          {{ item.matchedSlides === 1 ? "slide" : "slides" }} for reuse; this
-          overlap does not justify deleting the whole file.
+          Partial slide overlap ({{ item.matchedSlides }} {{ item.matchedSlides === 1 ? "slide" : "slides" }}). Keep both files to preserve unique slides.
         </p>
         <p>
           Compared with

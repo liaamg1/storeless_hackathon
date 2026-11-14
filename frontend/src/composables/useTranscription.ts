@@ -1,6 +1,20 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { getProcessingJob, getTranscript, getVideo, getVideos, uploadVideo } from "../services/transcription";
-import type { ProcessingJob, VideoRecord, VideoTranscript, VideoUploadResult } from "../types/transcription";
+import {
+  getProcessingJob,
+  getTranscript,
+  getVideo,
+  getVideos,
+  uploadVideo,
+} from "../services/transcription";
+import { processStoredFile } from "../services/uploads";
+import { notifyFilesChanged } from "../utils/fileUpdates";
+import { recommendedOperations } from "../utils/upload";
+import type {
+  ProcessingJob,
+  VideoRecord,
+  VideoTranscript,
+  VideoUploadResult,
+} from "../types/transcription";
 
 export function useTranscription() {
   const recordings = ref<VideoRecord[]>([]);
@@ -12,6 +26,7 @@ export function useTranscription() {
   const job = ref<ProcessingJob | null>(null);
   const transcript = ref<VideoTranscript | null>(null);
   const loadingStatus = ref(false);
+  const updatingVideo = ref(false);
   const statusError = ref("");
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let selectionVersion = 0;
@@ -70,15 +85,44 @@ export function useTranscription() {
     const version = selectionVersion;
     loadingStatus.value = true;
     try {
-      const recording = await getVideo(fileId);
+      let recording: VideoRecord;
+      try {
+        recording = await getVideo(fileId);
+      } catch {
+        await processStoredFile(fileId, recommendedOperations("video"));
+        notifyFilesChanged();
+        recording = await getVideo(fileId);
+      }
       if (version !== selectionVersion) return;
       selectedVideo.value = recording;
       await pollJob(recording.job_id, version);
     } catch (error) {
       if (version === selectionVersion) {
-        statusError.value = error instanceof Error ? error.message : "Could not open this recording.";
+        statusError.value =
+          error instanceof Error
+            ? error.message
+            : "Could not open this recording.";
         loadingStatus.value = false;
       }
+    }
+  }
+
+  async function runOrUpdateVideo(fileId: number): Promise<void> {
+    if (updatingVideo.value) return;
+    updatingVideo.value = true;
+    statusError.value = "";
+    try {
+      await processStoredFile(fileId, recommendedOperations("video"));
+      notifyFilesChanged();
+      await loadRecordings();
+      await selectVideo(fileId);
+    } catch (error) {
+      statusError.value =
+        error instanceof Error
+          ? error.message
+          : "Could not run or update video analysis.";
+    } finally {
+      updatingVideo.value = false;
     }
   }
 
@@ -102,8 +146,21 @@ export function useTranscription() {
   onBeforeUnmount(clearSelection);
 
   return {
-    recordings, loadingRecordings, recordingsError, loadRecordings,
-    uploading, uploadError, uploadRecording, selectedVideo, job, transcript,
-    loadingStatus, statusError, selectVideo, clearSelection,
+    recordings,
+    loadingRecordings,
+    recordingsError,
+    loadRecordings,
+    uploading,
+    uploadError,
+    uploadRecording,
+    selectedVideo,
+    job,
+    transcript,
+    loadingStatus,
+    updatingVideo,
+    statusError,
+    selectVideo,
+    runOrUpdateVideo,
+    clearSelection,
   };
 }

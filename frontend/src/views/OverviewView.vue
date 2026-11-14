@@ -5,12 +5,14 @@ import {
   Folder,
   FileText,
   Video,
+  Presentation,
   HardDrive,
   ArrowUpRight,
   Sparkles,
   RefreshCw,
 } from "@lucide/vue";
 import { useWorkspace } from "../composables/useWorkspace";
+import { useFileUpdates } from "../composables/useFileUpdates";
 import { fetchDuplicateGroups } from "../services/duplicates";
 import { filterFiles, formatDate } from "../utils/files";
 import { formatBytes } from "../utils/formatBytes";
@@ -43,16 +45,23 @@ const videoCount = computed(
   () => files.value.filter((file) => file.type === "video").length,
 );
 let active = true;
-onMounted(async () => {
+async function loadSavings(): Promise<void> {
+  savingsLoading.value = true;
   try {
     const result = await fetchDuplicateGroups();
     if (active) duplicateSavings.value = result.summary.potential_savings_bytes;
   } catch {
-    duplicateSavings.value = null;
+    if (active) duplicateSavings.value = null;
   } finally {
     if (active) savingsLoading.value = false;
   }
-});
+}
+function refreshAll(): void {
+  void refresh();
+  void loadSavings();
+}
+useFileUpdates(loadSavings);
+onMounted(loadSavings);
 onBeforeUnmount(() => {
   active = false;
 });
@@ -61,11 +70,11 @@ onBeforeUnmount(() => {
   <div class="page-intro">
     <div>
       <p class="eyebrow">Workspace at a glance</p>
-      <h1>Overview</h1>
+      <h1>Dashboard</h1>
       <p>Your content, processing activity, and opportunities to store less.</p>
     </div>
-    <button :disabled="loading" @click="refresh">
-      <RefreshCw :size="16" :class="{ spin: loading }" />Refresh files
+    <button :disabled="loading" aria-label="Refresh files" @click="refreshAll">
+      <RefreshCw :size="16" :class="{ spin: loading }" /><span>Refresh</span>
     </button>
   </div>
   <p v-if="error" class="notice error" role="alert">{{ error }}</p>
@@ -96,7 +105,7 @@ onBeforeUnmount(() => {
     </div>
     <div class="kpi-card">
       <div>
-        Potential Savings<span class="kpi-icon"><HardDrive :size="17" /></span>
+        Duplicate Savings<span class="kpi-icon"><HardDrive :size="17" /></span>
       </div>
       <strong>{{
         savingsLoading
@@ -104,7 +113,7 @@ onBeforeUnmount(() => {
           : duplicateSavings === null
             ? "Unavailable"
             : formatBytes(duplicateSavings)
-      }}</strong><small>Exact duplicate copies · originals retained</small>
+      }}</strong><small>Exact duplicate copies</small>
     </div>
   </div>
   <div class="overview-callout">
@@ -116,7 +125,7 @@ onBeforeUnmount(() => {
       </p>
     </div>
     <RouterLink :to="{ name: 'upload' }"
-      >Upload Files <ArrowUpRight :size="14"
+      >Open Workspace <ArrowUpRight :size="14"
     /></RouterLink>
   </div>
   <div class="dashboard-columns">
@@ -145,9 +154,6 @@ onBeforeUnmount(() => {
         <h2>Recent processing</h2>
         <span class="count-chip">All file types</span>
       </header>
-      <p class="muted" style="font-size: 12px">
-        Latest document and recording jobs and their current status.
-      </p>
       <p v-if="loading" role="status">Loading jobs…</p>
       <p v-else-if="statusError" class="notice" role="status">
         {{ statusError }}
@@ -155,7 +161,7 @@ onBeforeUnmount(() => {
       <EmptyState
         v-else-if="!processing.length"
         title="No processing jobs yet"
-        description="Open Upload Files to choose processing for documents or recordings."
+        description="Open Upload Files to analyze documents or recordings."
       />
       <div
         v-for="recording in processing"
@@ -165,7 +171,13 @@ onBeforeUnmount(() => {
       >
         <span class="file-type-icon" :class="recording.type"
           ><component
-            :is="recording.type === 'video' ? Video : FileText"
+            :is="
+              recording.type === 'video'
+                ? Video
+                : recording.type === 'pptx'
+                  ? Presentation
+                  : FileText
+            "
             :size="17"
         /></span>
         <div>
@@ -187,6 +199,7 @@ onBeforeUnmount(() => {
   </div>
   <FileDetailsDrawer
     v-if="selected"
+    :key="selected.id"
     :file="selected"
     @close="selectedId = null"
   />

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch, onBeforeUnmount } from "vue";
-import { useRoute } from "vue-router";
+import { computed, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { RefreshCw, ChevronLeft, ChevronRight, Folder } from "@lucide/vue";
 import FilesTable from "../components/files/FilesTable.vue";
 import FileFilters from "../components/files/FileFilters.vue";
@@ -11,6 +11,7 @@ import { filterFiles, type FileSort } from "../utils/files";
 import { formatBytes } from "../utils/formatBytes";
 const { files, loading, error, statusError, refresh } = useWorkspace();
 const route = useRoute();
+const router = useRouter();
 const query = ref("");
 const type = ref("all");
 const status = ref("all");
@@ -18,6 +19,28 @@ const sort = ref<FileSort>("newest");
 const page = ref(1);
 const pageSize = 12;
 const selectedId = ref<number | null>(null);
+
+function openFile(id: number): void {
+  selectedId.value = id;
+  const nextFile = String(id);
+  if (route.name === "files" && route.query.file !== nextFile) {
+    void router.replace({
+      name: "files",
+      query: { file: nextFile },
+    });
+  }
+}
+
+function closeDrawer(): void {
+  selectedId.value = null;
+  if (route.name === "files" && route.query.file) {
+    void router.replace({
+      name: "files",
+      query: {},
+    });
+  }
+}
+
 watch(
   () => route.query.file,
   (value) => {
@@ -26,17 +49,6 @@ watch(
   },
   { immediate: true },
 );
-let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-watch(files, (records) => {
-  clearTimeout(refreshTimer);
-  if (
-    records.some(
-      (file) => file.status === "queued" || file.status === "processing",
-    )
-  )
-    refreshTimer = setTimeout(() => void refresh(), 3000);
-});
-onBeforeUnmount(() => clearTimeout(refreshTimer));
 const selectedFile = computed(() =>
   files.value.find((file) => file.id === selectedId.value),
 );
@@ -68,18 +80,18 @@ function reset(): void {
   <div class="page-intro">
     <div>
       <p class="eyebrow">Workspace</p>
-      <h1>Files</h1>
-      <p>All your documents and recordings, organized in one place.</p>
+      <h1>All Files</h1>
+      <p>Inspect uploaded documents, presentations, and recordings.</p>
     </div>
-    <button :disabled="loading" @click="refresh">
-      <RefreshCw :size="16" :class="{ spin: loading }" />Refresh
+    <button :disabled="loading" aria-label="Refresh files" @click="refresh">
+      <RefreshCw :size="16" :class="{ spin: loading }" /><span>Refresh</span>
     </button>
   </div>
   <section class="files-workspace" aria-label="File workspace">
     <header class="workspace-summary">
       <div>
         <Folder :size="18" />
-        <h2>All files</h2>
+        <h2>Stored files</h2>
         <span class="count-chip">{{ loading ? "…" : files.length }}</span>
       </div>
       <span class="muted">{{ formatBytes(totalSize) }} total uploaded</span>
@@ -101,25 +113,25 @@ function reset(): void {
       <FilesTable
         v-if="paged.length"
         :files="paged"
-        @select="selectedId = $event" /><EmptyState
+        @select="openFile($event)" /><EmptyState
         v-else
         :title="
           files.length
             ? 'No files match your filters'
-            : 'Your workspace is ready'
+            : 'Your workspace is empty'
         "
         :description="
           files.length
             ? 'Try another filename or clear the active filters.'
-            : 'Use Upload Files to add your first PDF document or MP4 recording.'
+            : 'Use Upload Files to add your first PDF, PPTX, or MP4.'
         "
         ><button v-if="files.length" @click="reset">
           Clear filters
         </button></EmptyState
       >
-      <footer class="pagination">
+      <footer v-if="filtered.length" class="pagination">
         <span
-          >{{ filtered.length ? (page - 1) * pageSize + 1 : 0 }}–{{
+          >{{ (page - 1) * pageSize + 1 }}–{{
             Math.min(page * pageSize, filtered.length)
           }}
           of {{ filtered.length }} files</span
@@ -148,6 +160,6 @@ function reset(): void {
     v-if="selectedFile"
     :key="selectedFile.id"
     :file="selectedFile"
-    @close="selectedId = null"
+    @close="closeDrawer"
   />
 </template>
