@@ -24,8 +24,8 @@ defineEmits<{ select: [fileId: number] }>();
         <tr>
           <th scope="col" class="filename-column">File name</th>
           <th scope="col" class="type-column">Type</th>
-          <th scope="col">Size</th>
-          <th scope="col">Status</th>
+          <th scope="col" class="size-column">Size</th>
+          <th scope="col" class="status-column">Status</th>
           <th scope="col" class="date-column">Uploaded</th>
           <th scope="col" class="actions-column">
             <span class="sr-only">Actions</span>
@@ -71,8 +71,8 @@ defineEmits<{ select: [fileId: number] }>();
                     : "FILE"
             }}</span>
           </td>
-          <td class="nowrap">{{ formatBytes(file.size_bytes) }}</td>
-          <td>
+          <td class="size-column nowrap">{{ formatBytes(file.size_bytes) }}</td>
+          <td class="status-column">
             <StatusBadge :status="file.status" /><FileProgress
               v-if="['queued', 'processing'].includes(file.status)"
               compact

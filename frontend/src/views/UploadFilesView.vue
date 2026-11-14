@@ -51,7 +51,10 @@ const tab = ref<WorkspaceTab>(route.query.file ? "upload" : "review");
 
 function setTab(next: WorkspaceTab): void {
   tab.value = next;
-  if (route.query.tab !== next || route.query.file) {
+  if (
+    route.name === "upload" &&
+    (route.query.tab !== next || route.query.file)
+  ) {
     void router.replace({ name: "upload", query: { tab: next } });
   }
 }
@@ -59,13 +62,15 @@ function setTab(next: WorkspaceTab): void {
 watch(
   () => route.query.tab,
   (value) => {
+    if (route.name !== "upload") return;
     if (value === "upload" || value === "review" || value === "activity")
       tab.value = value;
   },
   { immediate: true },
 );
 watch(busy, (value, previous) => {
-  if (previous && !value && !pending.value.length) setTab("review");
+  if (route.name === "upload" && previous && !value && !pending.value.length)
+    setTab("review");
 });
 const dragging = ref(false),
   existingError = ref("");
@@ -108,6 +113,7 @@ async function poll(): Promise<void> {
 watch(
   () => route.query.file,
   async (value) => {
+    if (route.name !== "upload") return;
     const version = ++existingVersion;
     existingError.value = "";
     const id = typeof value === "string" ? Number(value) : 0;
@@ -139,7 +145,8 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <div class="page-intro">
+  <div>
+    <div class="page-intro">
     <div>
       <p class="eyebrow">Workspace</p>
       <h1>Storage Opportunities</h1>
@@ -440,6 +447,7 @@ onBeforeUnmount(() => {
       No files processed yet. Add files to start analyzing.
     </p>
   </section>
+  </div>
 </template>
 <style scoped>
 .workspace-bar {

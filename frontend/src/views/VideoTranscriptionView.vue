@@ -102,9 +102,11 @@ function setReadingMode(mode: "transcript" | "visual"): void {
 
 watch(
   () => [route.query.file, route.query.view],
-  ([value, view], [oldValue]) => {
+  ([value, view], oldValues) => {
+    if (route.name !== "transcription") return;
+    const oldValue = oldValues?.[0];
     readingMode.value = view === "visual" ? "visual" : "transcript";
-    if (value !== oldValue) {
+    if (value !== oldValue || oldValues === undefined) {
       downloadError.value = "";
       visualStatus.value = "";
       updateFeedback.value = "";

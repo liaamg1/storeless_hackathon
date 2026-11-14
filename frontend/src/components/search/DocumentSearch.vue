@@ -47,6 +47,7 @@ function cancelPendingSearch(): void {
 }
 
 function syncRouteQuery(): void {
+  if (route.name !== "search") return;
   const nextQuery: Record<string, string> = {};
   if (normalizedQuery.value) nextQuery.q = normalizedQuery.value;
   if (filter.value !== "all") nextQuery.type = filter.value;
@@ -106,6 +107,7 @@ function clearSearch(): void {
 watch(
   () => [route.query.q, route.query.type],
   ([q, type]) => {
+    if (route.name !== "search") return;
     filter.value = type === "pdf" || type === "video" ? type : "all";
     const routeQ = typeof q === "string" ? q : "";
     if (routeQ && routeQ !== response.value?.query) {
@@ -125,93 +127,95 @@ onBeforeUnmount(cancelPendingSearch);
 </script>
 
 <template>
-  <div class="page-intro">
-    <div>
-      <p class="eyebrow">Workspace</p>
-      <h1>Search</h1>
-      <p>Find the knowledge inside your documents, slides, and recordings.</p>
-    </div>
-  </div>
-  <section aria-labelledby="search-heading" class="search-page-section">
-    <h2 id="search-heading">Search your content</h2>
-    <form @submit.prevent="searchDocuments(true)">
-      <label for="document-search"
-        >Search PDFs, presentations, and video transcripts</label
-      >
-      <div class="search-controls">
-        <input
-          id="document-search"
-          v-model="query"
-          type="search"
-          maxlength="200"
-          placeholder="Search words or phrases across your workspace…"
-          autofocus
-          aria-describedby="search-help"
-        />
-        <button
-          class="button-primary"
-          type="submit"
-          :disabled="!canSearch || loading"
-        >
-          {{ loading ? "Searching…" : "Search" }}
-        </button>
-        <button v-if="query || response" type="button" @click="clearSearch">
-          Clear
-        </button>
+  <div>
+    <div class="page-intro">
+      <div>
+        <p class="eyebrow">Workspace</p>
+        <h1>Search</h1>
+        <p>Find the knowledge inside your documents, slides, and recordings.</p>
       </div>
-      <p id="search-help">
-        Use words, "quoted phrases", OR, or -excluded terms. Shows up to 20
-        matching pages, slides, or transcript segments.
+    </div>
+    <section aria-labelledby="search-heading" class="search-page-section">
+      <h2 id="search-heading">Search your content</h2>
+      <form @submit.prevent="searchDocuments(true)">
+        <label for="document-search"
+          >Search PDFs, presentations, and video transcripts</label
+        >
+        <div class="search-controls">
+          <input
+            id="document-search"
+            v-model="query"
+            type="search"
+            maxlength="200"
+            placeholder="Search words or phrases across your workspace…"
+            autofocus
+            aria-describedby="search-help"
+          />
+          <button
+            class="button-primary"
+            type="submit"
+            :disabled="!canSearch || loading"
+          >
+            {{ loading ? "Searching…" : "Search" }}
+          </button>
+          <button v-if="query || response" type="button" @click="clearSearch">
+            Clear
+          </button>
+        </div>
+        <p id="search-help">
+          Use words, "quoted phrases", OR, or -excluded terms. Shows up to 20
+          matching pages, slides, or transcript segments.
+        </p>
+      </form>
+      <div class="search-filter-row">
+        <div
+          class="segmented-control"
+          role="group"
+          aria-label="Filter search results"
+        >
+          <button
+            v-for="option in [
+              ['all', 'All'],
+              ['pdf', 'Documents & slides'],
+              ['video', 'Recordings'],
+            ] as const"
+            :key="option[0]"
+            type="button"
+            :class="{ active: filter === option[0] }"
+            :aria-pressed="filter === option[0]"
+            @click="setFilter(option[0])"
+          >
+            {{ option[1] }}
+          </button>
+        </div>
+        <span v-if="response" class="muted"
+          >{{ filteredResponse?.returned_count }} of
+          {{ response.returned_count }} matches</span
+        >
+      </div>
+      <p v-if="loading" role="status">Searching documents and recordings...</p>
+      <p v-else-if="error" class="error" role="alert">{{ error }}</p>
+      <SearchResults
+        v-else-if="filteredResponse"
+        :response="filteredResponse"
+        @open-page="
+          (fileId, pageNumber, fileType) =>
+            $emit('openPage', fileId, pageNumber, fileType)
+        "
+        @open-segment="
+          (fileId, segmentId, visual) =>
+            $emit('openSegment', fileId, segmentId, visual)
+        "
+      />
+      <p v-if="response && filter !== 'all'" class="muted search-filter-note">
+        Filters apply to the current set of up to 20 returned matches.
       </p>
-    </form>
-    <div class="search-filter-row">
-      <div
-        class="segmented-control"
-        role="group"
-        aria-label="Filter search results"
-      >
-        <button
-          v-for="option in [
-            ['all', 'All'],
-            ['pdf', 'Documents & slides'],
-            ['video', 'Recordings'],
-          ] as const"
-          :key="option[0]"
-          type="button"
-          :class="{ active: filter === option[0] }"
-          :aria-pressed="filter === option[0]"
-          @click="setFilter(option[0])"
-        >
-          {{ option[1] }}
-        </button>
-      </div>
-      <span v-if="response" class="muted"
-        >{{ filteredResponse?.returned_count }} of
-        {{ response.returned_count }} matches</span
-      >
-    </div>
-    <p v-if="loading" role="status">Searching documents and recordings...</p>
-    <p v-else-if="error" class="error" role="alert">{{ error }}</p>
-    <SearchResults
-      v-else-if="filteredResponse"
-      :response="filteredResponse"
-      @open-page="
-        (fileId, pageNumber, fileType) =>
-          $emit('openPage', fileId, pageNumber, fileType)
-      "
-      @open-segment="
-        (fileId, segmentId, visual) =>
-          $emit('openSegment', fileId, segmentId, visual)
-      "
-    />
-    <p v-if="response && filter !== 'all'" class="muted search-filter-note">
-      Filters apply to the current set of up to 20 returned matches.
-    </p>
-    <p v-if="!response && !loading && !error" class="search-start">
-      Enter a query to search your saved PDF pages, PowerPoint slides, and video
-      transcripts.
-    </p>
-  </section>
+      <p v-if="!response && !loading && !error" class="search-start">
+        Enter a query to search your saved PDF pages, PowerPoint slides, and video
+        transcripts.
+      </p>
+    </section>
+  </div>
 </template>
 
 <style scoped>

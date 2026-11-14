@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, watch } from "vue";
 import { useRoute, RouterLink, type RouteLocationRaw } from "vue-router";
 import {
   LayoutDashboard,
@@ -125,6 +126,22 @@ const groups: { label: string; items: NavItem[] }[] = [
     ],
   },
 ];
+
+const moreToolsOpen = ref(false);
+watch(
+  () => route.name,
+  () => {
+    const moreGroup = groups.find((group) => group.label === "More tools");
+    if (moreGroup?.items.some((item) => item.isActive())) {
+      moreToolsOpen.value = true;
+    }
+  },
+  { immediate: true },
+);
+
+function onMoreToolsToggle(event: Event): void {
+  moreToolsOpen.value = (event.target as HTMLDetailsElement).open;
+}
 </script>
 <template>
   <div class="sidebar-content" :class="{ collapsed }">
@@ -139,45 +156,53 @@ const groups: { label: string; items: NavItem[] }[] = [
       ></RouterLink
     >
     <nav aria-label="Main navigation">
-      <component
-        :is="group.label === 'More tools' ? 'details' : 'div'"
-        v-for="group in groups"
-        :key="group.label"
-        class="nav-group"
-        :open="
-          collapsed ||
-          group.items.some((item) => item.isActive()) ||
-          undefined
-        "
-      >
-        <summary
+      <template v-for="group in groups" :key="group.label">
+        <details
           v-if="group.label === 'More tools'"
-          :aria-label="collapsed ? 'More tools' : undefined"
+          class="nav-group"
+          :open="collapsed || moreToolsOpen || undefined"
+          @toggle="onMoreToolsToggle"
         >
-          {{ collapsed ? "•••" : "More tools" }}
-        </summary>
-        <p
-          v-if="!collapsed && group.label !== 'More tools'"
-          class="nav-group-label"
-        >
-          {{ group.label }}
-        </p>
-        <RouterLink
-          v-for="item in group.items"
-          :key="item.id"
-          :to="item.to"
-          class="nav-link"
-          :class="{ 'is-active': item.isActive() }"
-          :title="collapsed ? item.label : undefined"
-          :aria-label="collapsed ? item.label : undefined"
-          @click="$emit('navigate')"
-        >
-          <component :is="item.icon" :size="18" aria-hidden="true" /><span
-            v-if="!collapsed"
-            >{{ item.label }}</span
+          <summary :aria-label="collapsed ? 'More tools' : undefined">
+            {{ collapsed ? "•••" : "More tools" }}
+          </summary>
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.id"
+            :to="item.to"
+            class="nav-link"
+            :class="{ 'is-active': item.isActive() }"
+            :title="collapsed ? item.label : undefined"
+            :aria-label="collapsed ? item.label : undefined"
+            @click="$emit('navigate')"
           >
-        </RouterLink>
-      </component>
+            <component :is="item.icon" :size="18" aria-hidden="true" /><span
+              v-if="!collapsed"
+              >{{ item.label }}</span
+            >
+          </RouterLink>
+        </details>
+        <div v-else class="nav-group">
+          <p v-if="!collapsed" class="nav-group-label">
+            {{ group.label }}
+          </p>
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.id"
+            :to="item.to"
+            class="nav-link"
+            :class="{ 'is-active': item.isActive() }"
+            :title="collapsed ? item.label : undefined"
+            :aria-label="collapsed ? item.label : undefined"
+            @click="$emit('navigate')"
+          >
+            <component :is="item.icon" :size="18" aria-hidden="true" /><span
+              v-if="!collapsed"
+              >{{ item.label }}</span
+            >
+          </RouterLink>
+        </div>
+      </template>
     </nav>
     <div class="sidebar-bottom">
       <button

@@ -665,18 +665,26 @@ td {
 .files-table th,
 .files-table td {
   padding: 13px 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .filename-column {
-  width: 36%;
+  width: 32%;
 }
 .type-column {
   width: 8%;
+}
+.size-column {
+  width: 12%;
+}
+.status-column {
+  width: 16%;
 }
 .date-column {
   width: 15%;
 }
 .actions-column {
-  width: 185px;
+  width: 175px;
 }
 .file-name-button {
   display: flex;
@@ -1029,19 +1037,31 @@ dialog::backdrop {
   padding: 20px;
   margin: 0;
 }
-.recent-files-panel .type-column,
-.recent-files-panel .date-column {
+.recent-files-panel .type-column {
   display: none;
 }
 .recent-files-panel .filename-column {
-  width: 44%;
+  width: 38%;
+}
+.recent-files-panel .size-column {
+  width: 16%;
+}
+.recent-files-panel .status-column {
+  width: 20%;
+}
+.recent-files-panel .date-column {
+  display: table-cell;
+  width: 20%;
 }
 .recent-files-panel .actions-column {
-  width: 175px;
+  width: 44px;
+}
+.recent-files-panel .row-open-link {
+  display: none;
 }
 .recent-files-panel td,
 .recent-files-panel th {
-  padding: 12px;
+  padding: 12px 10px;
 }
 .processing-item {
   display: flex;
@@ -1834,10 +1854,10 @@ pre {
 }
 .recent-files-panel .date-column {
   display: table-cell;
-  width: 22%;
+  width: 20%;
 }
 .recent-files-panel .filename-column {
-  width: 40%;
+  width: 38%;
 }
 .recent-files-panel td,
 .recent-files-panel th {
@@ -1849,6 +1869,12 @@ pre {
   }
   .recent-files-panel .filename-column {
     width: 44%;
+  }
+  .recent-files-panel .size-column {
+    width: 22%;
+  }
+  .recent-files-panel .status-column {
+    width: 26%;
   }
 }
 

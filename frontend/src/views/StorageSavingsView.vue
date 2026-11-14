@@ -31,66 +31,68 @@ function choose(event: Event): void {
 }
 </script>
 <template>
-  <div class="page-intro">
-    <div>
-      <p class="eyebrow">Analytics</p>
-      <h1>Storage Savings</h1>
-      <p>Understand your optimized footprint, using actual output sizes.</p>
+  <div>
+    <div class="page-intro">
+      <div>
+        <p class="eyebrow">Analytics</p>
+        <h1>Storage Savings</h1>
+        <p>Understand your optimized footprint, using actual output sizes.</p>
+      </div>
     </div>
+    <section>
+      <div class="storage-picker">
+        <ChartNoAxesColumn :size="22" class="muted" /><label for="storage-file"
+          >Compare a file</label
+        ><select
+          id="storage-file"
+          :value="selectedId || ''"
+          :disabled="loading && !files.length"
+          @change="choose"
+        >
+          <option value="">Select a document or recording…</option>
+          <option v-for="file in files" :key="file.id" :value="file.id">
+            {{ file.filename }}
+          </option>
+        </select>
+        <template v-if="selected">
+          <RouterLink
+            v-if="selected.type === 'video'"
+            class="picker-action-link"
+            :to="{ name: 'transcription', query: { file: String(selected.id) } }"
+          >
+            <Video :size="15" />Open Transcript<ArrowUpRight :size="14" />
+          </RouterLink>
+          <RouterLink
+            v-else-if="selected.type === 'pdf'"
+            class="picker-action-link"
+            :to="{ name: 'extract', query: { file: String(selected.id) } }"
+          >
+            <FileText :size="15" />Open Document Text<ArrowUpRight :size="14" />
+          </RouterLink>
+          <RouterLink
+            v-else-if="selected.type === 'pptx'"
+            class="picker-action-link"
+            :to="{ name: 'slides', query: { file: String(selected.id) } }"
+          >
+            <Presentation :size="15" />Compare Slides<ArrowUpRight :size="14" />
+          </RouterLink>
+        </template>
+      </div>
+    </section>
+    <p v-if="error && !selectedId" class="notice error" role="alert">
+      {{ error }}
+    </p>
+    <StorageSavings
+      v-if="selectedId"
+      :key="selectedId"
+      :file-id="selectedId"
+    /><p v-else-if="loading" role="status">Loading files…</p>
+    <EmptyState
+      v-else
+      title="A smaller footprint starts with a file"
+      description="Select a file above to compare its original size with measurable optimized output. Original uploads remain retained."
+    />
   </div>
-  <section>
-    <div class="storage-picker">
-      <ChartNoAxesColumn :size="22" class="muted" /><label for="storage-file"
-        >Compare a file</label
-      ><select
-        id="storage-file"
-        :value="selectedId || ''"
-        :disabled="loading && !files.length"
-        @change="choose"
-      >
-        <option value="">Select a document or recording…</option>
-        <option v-for="file in files" :key="file.id" :value="file.id">
-          {{ file.filename }}
-        </option>
-      </select>
-      <template v-if="selected">
-        <RouterLink
-          v-if="selected.type === 'video'"
-          class="picker-action-link"
-          :to="{ name: 'transcription', query: { file: String(selected.id) } }"
-        >
-          <Video :size="15" />Open Transcript<ArrowUpRight :size="14" />
-        </RouterLink>
-        <RouterLink
-          v-else-if="selected.type === 'pdf'"
-          class="picker-action-link"
-          :to="{ name: 'extract', query: { file: String(selected.id) } }"
-        >
-          <FileText :size="15" />Open Document Text<ArrowUpRight :size="14" />
-        </RouterLink>
-        <RouterLink
-          v-else-if="selected.type === 'pptx'"
-          class="picker-action-link"
-          :to="{ name: 'slides', query: { file: String(selected.id) } }"
-        >
-          <Presentation :size="15" />Compare Slides<ArrowUpRight :size="14" />
-        </RouterLink>
-      </template>
-    </div>
-  </section>
-  <p v-if="error && !selectedId" class="notice error" role="alert">
-    {{ error }}
-  </p>
-  <StorageSavings
-    v-if="selectedId"
-    :key="selectedId"
-    :file-id="selectedId"
-  /><p v-else-if="loading" role="status">Loading files…</p>
-  <EmptyState
-    v-else
-    title="A smaller footprint starts with a file"
-    description="Select a file above to compare its original size with measurable optimized output. Original uploads remain retained."
-  />
 </template>
 <style scoped>
 .picker-action-link {

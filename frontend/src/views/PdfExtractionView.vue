@@ -22,7 +22,7 @@ const route = useRoute();
 const router = useRouter();
 const { files } = useWorkspace();
 const pdfFiles = computed(() =>
-  files.value.filter((file) => file.file_type === "pdf"),
+  files.value.filter((file) => file.type === "pdf"),
 );
 const selectedFileId = computed(() => positiveInteger(route.query.file) ?? 0);
 const running = ref(false);
@@ -82,6 +82,7 @@ async function runOrUpdatePdf(): Promise<void> {
 watch(
   () => [route.query.file, route.query.page],
   () => {
+    if (route.name !== "extract") return;
     const fileId = positiveInteger(route.query.file);
     if (fileId) {
       void selectDocument(fileId, positiveInteger(route.query.page));
