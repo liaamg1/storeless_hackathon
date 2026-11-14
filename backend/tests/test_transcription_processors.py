@@ -79,6 +79,80 @@ def test_audio_extraction_command(tmp_path, monkeypatch):
     assert options['check'] is True
 
 
+def test_split_video_segments_uses_ffmpeg_segment_stream_copy(tmp_path, monkeypatch):
+    source = tmp_path / 'large_recording.mp4'
+    source.write_bytes(b'mp4')
+    seg_dir = tmp_path / 'segments'
+    calls = []
+
+    def run(arguments, **kwargs):
+        calls.append((arguments, kwargs))
+        for idx in range(4):
+            (seg_dir / f'segment_{idx:03d}.mp4').write_bytes(b'valid-mp4-segment')
+        (seg_dir / 'segments.csv').write_text(
+            'segment_000.mp4,0.000000,300.120000\n'
+            'segment_001.mp4,300.120000,599.880000\n'
+            'segment_002.mp4,599.880000,900.400000\n'
+            'segment_003.mp4,900.400000,1200.000000\n',
+            encoding='utf-8',
+        )
+        return SimpleNamespace(stdout='')
+
+    monkeypatch.setattr(audio_extractor.subprocess, 'run', run)
+    segments = audio_extractor.split_video_segments(
+        source, seg_dir, 1_200_000, parts=4, ffmpeg='ffmpeg-custom', timeout=90
+    )
+    arguments, options = calls[0]
+    assert arguments == [
+        'ffmpeg-custom', '-nostdin', '-v', 'error', '-y', '-protocol_whitelist', 'file,pipe',
+        '-i', str(source), '-f', 'segment', '-segment_time', '300', '-c', 'copy',
+        '-reset_timestamps', '1', '-segment_list', str(seg_dir / 'segments.csv'),
+        '-segment_list_type', 'csv', str(seg_dir / 'segment_%03d.mp4'),
+    ]
+    assert options['timeout'] == 90
+    assert [(s.path.name, s.start_ms, s.end_ms) for s in segments] == [
+        ('segment_000.mp4', 0, 300120),
+        ('segment_001.mp4', 300120, 599880),
+        ('segment_002.mp4', 599880, 900400),
+        ('segment_003.mp4', 900400, 1200000),
+    ]
+
+
+def test_extract_segmented_audio_concatenates_pcm_and_cleans_segments(tmp_path, monkeypatch):
+    source = tmp_path / 'large_recording.mp4'
+    source.write_bytes(b'mp4')
+    target = tmp_path / 'combined.wav'
+
+    def fake_split(video_path, output_dir, duration_ms, *, parts=4, ffmpeg='ffmpeg', timeout=3600):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        result = []
+        for idx in range(parts):
+            seg = output_dir / f'segment_{idx:03d}.mp4'
+            seg.write_bytes(b'seg')
+            result.append(audio_extractor.VideoSegment(seg, idx * 1000, (idx + 1) * 1000))
+        return result
+
+    def fake_extract(video_path, output_path, ffmpeg='ffmpeg', timeout=3600):
+        with wave.open(str(output_path), 'wb') as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(16000)
+            handle.writeframes(b'\x01\x00' * 1600)
+        return output_path
+
+    monkeypatch.setattr(audio_extractor, 'split_video_segments', fake_split)
+    monkeypatch.setattr(audio_extractor, 'extract_audio', fake_extract)
+    output = audio_extractor.extract_segmented_audio(
+        source, target, 'ffmpeg', 60, duration_ms=4000, parts=4
+    )
+    assert output == target
+    assert not (tmp_path / 'mp4_segments').exists()
+    with wave.open(str(target), 'rb') as handle:
+        assert handle.getnchannels() == 1
+        assert handle.getframerate() == 16000
+        assert handle.getnframes() == 4 * 1600
+
+
 @pytest.mark.parametrize('error,expected', [
     (FileNotFoundError(), MediaToolUnavailableError),
     (subprocess.CalledProcessError(1, ['ffmpeg'], stderr='private details'), MediaProcessingError),
@@ -158,7 +232,7 @@ def test_model_is_reused_and_loading_failure_is_safe(monkeypatch):
     assert first is speech_recognizer.load_model('tiny', 'cpu', 'int8', '/tmp/cache')
     assert len(calls) == 1
     assert calls[0][1]['device'] == 'cpu'
-    assert calls[0][1]['cpu_threads'] == 2
+    assert calls[0][1]['cpu_threads'] == 3
     assert calls[0][1]['num_workers'] == 1
     speech_recognizer.load_model.cache_clear()
     def fail(*args, **kwargs):
@@ -310,7 +384,7 @@ def test_default_inference_resource_settings(monkeypatch):
     monkeypatch.delenv('WHISPER_CPU_THREADS', raising=False)
     settings = get_transcription_settings()
     assert settings.chunk_seconds == 60
-    assert settings.cpu_threads == 2
+    assert settings.cpu_threads == 3
 
 
 def test_pcm_samples_are_normalized_without_losing_audio(monkeypatch, tmp_path):

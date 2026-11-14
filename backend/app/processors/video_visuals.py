@@ -1,16 +1,19 @@
 """Incremental sampled-frame extraction; all image buffers have a fixed size."""
 
+from concurrent.futures import ThreadPoolExecutor
+import shutil
 import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Timer
+from threading import Lock, Timer
 from typing import BinaryIO
 
 import numpy as np
 import pymupdf
 
+from app.processors.audio_extractor import MediaProcessingError, split_video_segments
 from app.processors.slide_hash import hash_rendered_slide, perceptual_distance
 
 WIDTH, HEIGHT = 1280, 720
@@ -173,3 +176,122 @@ def extract_visuals(
             process.wait()
             process.stdout.close()
     return [frame for frame in frames if frame.end_ms > frame.start_ms]
+
+
+def extract_segmented_visuals(
+    path: Path,
+    output: Path,
+    duration_ms: int,
+    *,
+    parts: int = 4,
+    ffmpeg: str = 'ffmpeg',
+    interval: float = 5,
+    distance: int = 6,
+    max_frames: int = 300,
+    timeout: int = 3600,
+    on_progress=None,
+) -> list[ExtractedFrame]:
+    """Split a large MP4 on keyframes via `-f segment -c copy` and decode visual frames in parallel."""
+    if parts <= 1:
+        return extract_visuals(
+            path,
+            output,
+            duration_ms,
+            ffmpeg=ffmpeg,
+            interval=interval,
+            distance=distance,
+            max_frames=max_frames,
+            timeout=timeout,
+            on_progress=on_progress,
+        )
+    output.mkdir(parents=True, exist_ok=True)
+    total_samples = max(1, int(np.ceil(duration_ms / (interval * 1000))))
+    progress_lock = Lock()
+    completed_samples = 0
+
+    def _report_segment_progress(_done: int, _total: int) -> None:
+        nonlocal completed_samples
+        if not on_progress:
+            return
+        with progress_lock:
+            completed_samples = min(total_samples, completed_samples + 1)
+            on_progress(completed_samples, total_samples)
+
+    with tempfile.TemporaryDirectory(prefix='restore-visual-seg-') as temp_root:
+        temp_dir = Path(temp_root)
+        try:
+            segments = split_video_segments(
+                path,
+                temp_dir / 'mp4',
+                duration_ms,
+                parts=parts,
+                ffmpeg=ffmpeg,
+                timeout=timeout,
+            )
+        except MediaProcessingError as exc:
+            raise VisualExtractionError('The recording could not be split for visual analysis.') from exc
+
+        def _decode_segment(index_and_seg):
+            idx, seg = index_and_seg
+            seg_duration = max(1, seg.end_ms - seg.start_ms)
+            seg_out = temp_dir / f'out_{idx:03d}'
+            try:
+                seg_frames = extract_visuals(
+                    seg.path,
+                    seg_out,
+                    seg_duration,
+                    ffmpeg=ffmpeg,
+                    interval=interval,
+                    distance=distance,
+                    max_frames=max_frames,
+                    timeout=timeout,
+                    on_progress=_report_segment_progress if on_progress else None,
+                )
+                return idx, seg, seg_frames
+            finally:
+                seg.path.unlink(missing_ok=True)
+
+        with ThreadPoolExecutor(max_workers=min(len(segments), max(1, parts))) as pool:
+            decoded = list(pool.map(_decode_segment, enumerate(segments)))
+
+        merged: list[ExtractedFrame] = []
+        for _idx, seg, seg_frames in sorted(decoded, key=lambda item: item[0]):
+            for frame in seg_frames:
+                abs_start = seg.start_ms + frame.start_ms
+                abs_end = min(duration_ms, seg.start_ms + frame.end_ms)
+                if abs_end <= abs_start:
+                    continue
+                if (
+                    merged
+                    and merged[-1].end_ms >= seg.start_ms
+                    and perceptual_distance(merged[-1].image_hash, frame.image_hash) <= distance
+                ):
+                    merged[-1].end_ms = max(merged[-1].end_ms, abs_end)
+                    continue
+                if len(merged) >= max_frames:
+                    continue
+                reused = next(
+                    (
+                        existing
+                        for existing in merged
+                        if perceptual_distance(existing.image_hash, frame.image_hash) <= distance
+                    ),
+                    None,
+                )
+                if reused is not None:
+                    target = reused.image_path
+                else:
+                    target = output / f'frame-{abs_start}.jpg'
+                    if not target.exists():
+                        shutil.move(str(frame.image_path), str(target))
+                merged.append(
+                    ExtractedFrame(
+                        abs_start,
+                        abs_end,
+                        target,
+                        frame.image_hash,
+                        target.stat().st_size,
+                    )
+                )
+
+    return merged

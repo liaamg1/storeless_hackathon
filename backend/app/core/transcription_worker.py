@@ -53,7 +53,7 @@ async def supervise_worker(stopping: asyncio.Event, kind: str | None = None, slo
                 arguments += ['--kind', kind, '--slot', str(slot)]
                 env = os.environ.copy()
                 # Keep NumPy/BLAS/FFmpeg work from creating a thread pool per process.
-                threads = env.get('WHISPER_CPU_THREADS', '2') if kind == 'transcription' else '1'
+                threads = env.get('WHISPER_CPU_THREADS', '3') if kind == 'transcription' else '1'
                 for variable in (
                     'OMP_NUM_THREADS',
                     'OPENBLAS_NUM_THREADS',

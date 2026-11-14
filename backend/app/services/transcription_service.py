@@ -7,10 +7,12 @@ from typing import BinaryIO
 from uuid import uuid4
 
 from app.core.config import get_settings, get_transcription_settings
+from app.processors import audio_extractor as _audio_extractor
 from app.processors.audio_extractor import (
     MediaProcessingError,
     MediaToolUnavailableError,
     extract_audio,
+    extract_segmented_audio,
     validate_video,
 )
 from app.processors.speech_recognizer import SpeechRecognitionError, transcribe_audio
@@ -78,15 +80,32 @@ def process_video_job(job: repository.ClaimedVideoJob) -> None:
             logger.info("duplicate_transcript_reused file_id=%s job_id=%s", job.file_id, job.job_id)
             return
         logger.info("video_validation_started job_id=%s file_id=%s", job.job_id, job.file_id)
-        validate_video(job.storage_path, settings.ffprobe)
+        metadata = validate_video(job.storage_path, settings.ffprobe)
         logger.info("video_validated job_id=%s", job.job_id)
         # WAV data is temporary: no database storage and cleanup on normal failure/success.
         with TemporaryDirectory(prefix=f"restore-audio-{job.job_id}-") as temporary_dir:
             repository.update_job_step(job.job_id, 'extracting_audio')
             logger.info("audio_extraction_started job_id=%s", job.job_id)
-            audio_path = extract_audio(
-                job.storage_path, Path(temporary_dir) / 'audio.wav', settings.ffmpeg, settings.media_timeout
+            target_wav = Path(temporary_dir) / 'audio.wav'
+            file_size = job.storage_path.stat().st_size if job.storage_path.is_file() else 0
+            use_segmented = (
+                settings.segment_parts > 1
+                and file_size >= settings.segment_min_bytes
+                and extract_audio is _audio_extractor.extract_audio
             )
+            if use_segmented:
+                audio_path = extract_segmented_audio(
+                    job.storage_path,
+                    target_wav,
+                    settings.ffmpeg,
+                    settings.media_timeout,
+                    duration_ms=metadata.duration_ms,
+                    parts=settings.segment_parts,
+                )
+            else:
+                audio_path = extract_audio(
+                    job.storage_path, target_wav, settings.ffmpeg, settings.media_timeout
+                )
             logger.info("audio_extraction_completed job_id=%s", job.job_id)
             repository.update_job_step(job.job_id, 'transcribing_audio')
             logger.info("transcription_started job_id=%s", job.job_id)
@@ -102,6 +121,7 @@ def process_video_job(job: repository.ClaimedVideoJob) -> None:
                     total_ms,
                 )
 
+            extra_kwargs = {"parallel_workers": settings.segment_parts} if use_segmented else {}
             result = transcribe_audio(
                 audio_path,
                 model_name=settings.model_name,
@@ -112,6 +132,7 @@ def process_video_job(job: repository.ClaimedVideoJob) -> None:
                 chunk_seconds=settings.chunk_seconds,
                 cpu_threads=settings.cpu_threads,
                 on_progress=report_progress,
+                **extra_kwargs,
             )
             logger.info(
                 "transcription_completed job_id=%s segment_count=%s", job.job_id, len(result.segments)

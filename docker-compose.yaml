@@ -24,6 +24,7 @@ services:
       UPLOAD_DIR: /app/uploads
       WHISPER_DOWNLOAD_ROOT: /app/.cache/whisper
     volumes:
+      - ./backend/app:/app/app
       - backend_uploads:/app/uploads
       - whisper_cache:/app/.cache/whisper
     depends_on:

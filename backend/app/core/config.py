@@ -42,6 +42,8 @@ class TranscriptionSettings:
     download_root: str
     chunk_seconds: int
     cpu_threads: int
+    segment_parts: int = 4
+    segment_min_bytes: int = 50_000_000
 
 
 def get_transcription_settings() -> TranscriptionSettings:
@@ -50,9 +52,13 @@ def get_transcription_settings() -> TranscriptionSettings:
     if max_bytes <= 0 or timeout <= 0:
         raise ValueError("Video upload limit and media timeout must be positive")
     chunk_seconds = int(os.getenv("WHISPER_CHUNK_SECONDS", "60"))
-    cpu_threads = int(os.getenv("WHISPER_CPU_THREADS", "2"))
+    cpu_threads = int(os.getenv("WHISPER_CPU_THREADS", "3"))
     if not 1 <= chunk_seconds <= 120 or cpu_threads < 1:
         raise ValueError("WHISPER_CHUNK_SECONDS must be 1–120 and WHISPER_CPU_THREADS must be positive")
+    segment_parts = int(os.getenv("VIDEO_SEGMENT_PARTS", "4"))
+    segment_min_bytes = int(os.getenv("VIDEO_SEGMENT_MIN_BYTES", "50000000"))
+    if segment_parts < 1 or segment_min_bytes < 0:
+        raise ValueError("VIDEO_SEGMENT_PARTS must be >= 1 and VIDEO_SEGMENT_MIN_BYTES must be >= 0")
     model_dir = Path(os.getenv("WHISPER_DOWNLOAD_ROOT", str(BACKEND_DIR / ".cache/whisper")))
     if not model_dir.is_absolute():
         model_dir = BACKEND_DIR / model_dir
@@ -69,6 +75,8 @@ def get_transcription_settings() -> TranscriptionSettings:
         download_root=str(model_dir.resolve()),
         chunk_seconds=chunk_seconds,
         cpu_threads=cpu_threads,
+        segment_parts=segment_parts,
+        segment_min_bytes=segment_min_bytes,
     )
 
 

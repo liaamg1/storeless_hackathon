@@ -7,7 +7,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.core.config import get_settings, get_transcription_settings
-from app.processors.video_visuals import VisualExtractionError, extract_visuals
+from app.processors import video_visuals as _video_visuals
+from app.processors.video_visuals import (
+    VisualExtractionError,
+    extract_segmented_visuals,
+    extract_visuals,
+)
 from app.repositories import visual_repository as repository
 from app.repositories.transcription_repository import (
     TranscriptNotReadyError,
@@ -125,17 +130,37 @@ def process_visual_job(job: dict) -> None:
         settings = get_transcription_settings()
         from app.repositories.job_repository import progress
 
-        frames = extract_visuals(
-            Path(job['storage_path']),
-            output,
-            job['duration_ms'],
-            ffmpeg=settings.ffmpeg,
-            interval=float(os.getenv('VISUAL_SAMPLE_INTERVAL_SECONDS', '5')),
-            distance=int(os.getenv('VISUAL_HASH_DISTANCE', '6')),
-            max_frames=int(os.getenv('VISUAL_MAX_FRAMES', '300')),
-            timeout=settings.media_timeout,
-            on_progress=lambda done, total: progress(job['job_id'], done, total, 'frames'),
-        )
+        source_path = Path(job['storage_path'])
+        file_size = source_path.stat().st_size if source_path.is_file() else 0
+        if (
+            settings.segment_parts > 1
+            and file_size >= settings.segment_min_bytes
+            and extract_visuals is _video_visuals.extract_visuals
+        ):
+            frames = extract_segmented_visuals(
+                source_path,
+                output,
+                job['duration_ms'],
+                parts=settings.segment_parts,
+                ffmpeg=settings.ffmpeg,
+                interval=float(os.getenv('VISUAL_SAMPLE_INTERVAL_SECONDS', '5')),
+                distance=int(os.getenv('VISUAL_HASH_DISTANCE', '6')),
+                max_frames=int(os.getenv('VISUAL_MAX_FRAMES', '300')),
+                timeout=settings.media_timeout,
+                on_progress=lambda done, total: progress(job['job_id'], done, total, 'frames'),
+            )
+        else:
+            frames = extract_visuals(
+                source_path,
+                output,
+                job['duration_ms'],
+                ffmpeg=settings.ffmpeg,
+                interval=float(os.getenv('VISUAL_SAMPLE_INTERVAL_SECONDS', '5')),
+                distance=int(os.getenv('VISUAL_HASH_DISTANCE', '6')),
+                max_frames=int(os.getenv('VISUAL_MAX_FRAMES', '300')),
+                timeout=settings.media_timeout,
+                on_progress=lambda done, total: progress(job['job_id'], done, total, 'frames'),
+            )
         repository.complete(job, frames)
         logger.info('visual_analysis_completed job_id=%s frame_count=%s', job['job_id'], len(frames))
     except Exception as exc:
