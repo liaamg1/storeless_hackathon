@@ -23,6 +23,7 @@ export interface UploadItem {
   operations: Operation[];
   status: "selected" | "uploading" | "accepted" | "failed";
   error: string;
+  uploadProgress?: number | null;
 }
 const items = ref<UploadItem[]>([]),
   limits = ref<UploadLimits | null>(null);
@@ -132,10 +133,13 @@ async function start(): Promise<void> {
       if (kind) item.operations = recommendedOperations(kind);
       item.status = "uploading";
       item.error = "";
+      item.uploadProgress = null;
       try {
         const result = item.stored
           ? await processStoredFile(item.stored.file_id, item.operations)
-          : await uploadAndProcess(item.file!, item.operations);
+          : await uploadAndProcess(item.file!, item.operations, (percent) => {
+              item.uploadProgress = percent;
+            });
         item.stored = result;
         item.file = null;
         item.status = "accepted";

@@ -3,10 +3,10 @@
 from pathlib import Path
 from typing import BinaryIO
 
-from app.core.config import get_settings, get_transcription_settings
 from app.processors.pdf_processor import extract_pdf_pages
 from app.repositories import upload_repository as repository
 from app.repositories import visual_repository
+from app.repositories.job_repository import percentage
 from app.services import file_service, presentation_service, transcription_service
 from app.services.duplicate_service import get_duplicate_summary
 from app.services.storage_service import get_storage_savings
@@ -47,26 +47,24 @@ def validate_selection(file_type: str, operations: list[str]) -> list[str]:
     return selected
 
 
-def coordinate(file_id: int, operations: list[str]) -> None:
+def coordinate(file_id: int, operations: list[str]) -> int:
     file = repository.snapshot(file_id)
     if file is None:
         raise UploadedFileNotFoundError('File not found.')
+    visited = set()
+    while file['original_removed_at'] is not None:
+        if file_id in visited or not file['duplicate_of']:
+            raise UploadedFileNotFoundError('Retained original not found.')
+        visited.add(file_id)
+        file_id = file['duplicate_of']
+        file = repository.snapshot(file_id)
+        if file is None:
+            raise UploadedFileNotFoundError('Retained original not found.')
     file_type = kind(file['filename'])
     operations = validate_selection(file_type, operations)
     repository.merge_options(file_id, operations)
-    if file_type == 'pdf':
-
-        def ensure_text() -> None:
-            if file['has_pages']:
-                return
-            path = Path(file['storage_path']) if file['storage_path'] else None
-            if path is None or not path.is_file():
-                raise file_service.InvalidUploadError(
-                    'The original PDF is not available for text extraction.'
-                )
-            repository.add_pdf_pages(file_id, extract_pdf_pages(path))
-
-        repository.run_inline(file_id, 'pdf_text', ensure_text)
+    if file_type == 'pdf' and not file['has_pages']:
+        repository.queue(file_id, 'pdf_text')
     if 'transcribe' in operations:
         repository.queue(file_id, 'video_transcription')
     if 'slides' in operations:
@@ -75,37 +73,25 @@ def coordinate(file_id: int, operations: list[str]) -> None:
         # This queue only claims work after speech completes, including silent speech results.
         visual_repository.queue(file_id)
     if 'duplicates' in operations:
-        repository.run_inline(file_id, 'duplicate_check', get_duplicate_summary)
+        repository.queue(file_id, 'duplicate_check')
+    return file_id
 
 
 def upload(source: BinaryIO, filename: str | None, operations: list[str]) -> dict:
     filename = (filename or '').replace('\\', '/').rsplit('/', 1)[-1]
     file_type = kind(filename)
     selected = validate_selection(file_type, operations)
-    limit = (
-        get_transcription_settings().max_video_bytes
-        if file_type == 'video'
-        else get_settings().max_upload_bytes
-    )
-    # Reuse the streaming limit/hash implementation. A duplicate upload is read
-    # once for identification but never stored/extracted a second time.
-    size, digest = file_service.save_uploaded_file(source, None, limit)
-    source.seek(0)
-    file_id = repository.find_existing(digest, size, Path(filename).suffix.lower())
-    reused = file_id is not None
-    if file_id is None:
-        if file_type == 'pdf':
-            file_id = file_service.upload_pdf(source, filename, processing_options=selected).id
-        elif file_type == 'video':
-            file_id = transcription_service.upload_video(
-                source, filename, processing_options=selected
-            ).file_id
-        else:
-            file_id = presentation_service.upload_presentation(
-                source, filename, processing_options=selected
-            ).file_id
-    coordinate(file_id, selected)
-    return {**get_processing(file_id), 'reused': reused}
+    if file_type == 'pdf':
+        file_id = file_service.upload_pdf(source, filename, processing_options=selected).id
+    elif file_type == 'video':
+        recording = transcription_service.upload_video(source, filename, processing_options=selected)
+        file_id = recording.file_id
+    else:
+        file_id = presentation_service.upload_presentation(
+            source, filename, processing_options=selected
+        ).file_id
+    file_id = coordinate(file_id, selected)
+    return {**get_processing(file_id), 'reused': False}
 
 
 def get_processing(file_id: int) -> dict:
@@ -125,7 +111,17 @@ def get_processing(file_id: int) -> dict:
         if op == 'pdf_text':
             job = jobs.get('pdf_text')
             step = (
-                {key: job[key] for key in ('status', 'current_step', 'error_message')}
+                {
+                    key: job[key]
+                    for key in (
+                        'status',
+                        'current_step',
+                        'error_message',
+                        'progress_current',
+                        'progress_total',
+                        'progress_unit',
+                    )
+                }
                 if job
                 else {
                     'status': 'completed' if file['has_pages'] else 'queued',
@@ -155,7 +151,17 @@ def get_processing(file_id: int) -> dict:
         else:
             job = jobs.get(JOB_TYPES[op])
             step = (
-                {key: job[key] for key in ('status', 'current_step', 'error_message')}
+                {
+                    key: job[key]
+                    for key in (
+                        'status',
+                        'current_step',
+                        'error_message',
+                        'progress_current',
+                        'progress_total',
+                        'progress_unit',
+                    )
+                }
                 if job
                 else {'status': 'queued', 'current_step': 'waiting_for_processing', 'error_message': None}
             )
@@ -165,7 +171,7 @@ def get_processing(file_id: int) -> dict:
                     'current_step': 'dependency_failed',
                     'error_message': 'Visual extraction is waiting for successful transcription. Retry this file.',
                 }
-        steps.append({'operation': op, **step})
+        steps.append({'operation': op, **step, 'progress_percent': percentage(step)})
     statuses = [step['status'] for step in steps]
     status = (
         'failed'
@@ -187,6 +193,13 @@ def get_processing(file_id: int) -> dict:
         'current_step': current['current_step'] if current else 'completed' if steps else 'not_processed',
         'error_message': current['error_message'] if current else None,
         'steps': steps,
+        'progress_percent': (
+            100 if status == 'completed' else current.get('progress_percent') if current else None
+        ),
+        'progress_scope': 'current_step',
+        'progress_current': current.get('progress_current') if current else None,
+        'progress_total': current.get('progress_total') if current else None,
+        'progress_unit': current.get('progress_unit') if current else None,
     }
 
 

@@ -28,6 +28,9 @@ def get_storage_savings(file_id: int) -> StorageSavings:
         status='unavailable', components=components,
         message='No measurable optimized output file has been generated for this file.',
     )
+    if source['original_removed_at'] is not None:
+        result.message = f"This duplicate original was removed. Retained original: File #{source['duplicate_of']}."
+        return result
     if source['file_type'] != 'video':
         result.components[1] = StorageComponent(kind='images', label='Slide previews (analysis only)', status='unavailable')
         result.message = (

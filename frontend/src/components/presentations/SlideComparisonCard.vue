@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import type { SlideComparison } from "../../types/presentation";
+import SlideRevision from "./SlideRevision.vue";
 import { slideImageUrl } from "../../services/presentations";
 const props = defineProps<{ result: SlideComparison }>();
 const matchId = ref<number | null>(null);
@@ -105,6 +106,11 @@ const labels = {
     <p v-else class="muted">
       No sufficiently similar slide found in another analyzed presentation.
     </p>
+    <SlideRevision
+      v-if="match"
+      :selected-id="result.slide.id"
+      :compared-id="match.slide.id"
+    />
     <div class="slide-recommendation">
       <strong>Suggested action</strong>
       <p v-if="match?.classification === 'exact'">

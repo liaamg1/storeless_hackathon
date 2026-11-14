@@ -64,3 +64,9 @@ def analyze(file_id: int) -> PresentationRecord:
 @router.get('/{file_id}/comparison', response_model=PresentationComparison)
 def comparison(file_id: int) -> PresentationComparison:
     return presentation_response(lambda: service.get_comparison(file_id))
+
+
+@router.get('/slides/{slide_id}/revisions/{other_id}')
+def slide_revision(slide_id: int, other_id: int) -> dict:
+    from app.services.slide_revision import revision
+    return presentation_response(lambda: revision(slide_id,other_id))

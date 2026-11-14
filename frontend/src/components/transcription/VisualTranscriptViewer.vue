@@ -8,6 +8,7 @@ import {
 } from "../../services/transcription";
 import { formatTimestamp } from "../../utils/formatTimestamp";
 import type { VisualTranscript } from "../../types/transcription";
+import SourceSlideMatches from "./SourceSlideMatches.vue";
 import VisualRecommendations from "./VisualRecommendations.vue";
 
 const props = defineProps<{
@@ -288,6 +289,11 @@ watch(
               />
             </a>
           </template>
+          <SourceSlideMatches
+            v-if="section.visual"
+            :file-id="fileId"
+            :frame-id="section.visual.id"
+          />
           <p
             v-if="!showTimestamps && section.segments.length"
             class="visual-speech"

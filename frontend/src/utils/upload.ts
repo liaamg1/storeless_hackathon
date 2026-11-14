@@ -1,4 +1,9 @@
-import type { Operation, UploadKind, UploadLimits } from "../types/upload";
+import type {
+  Operation,
+  ProcessingFile,
+  UploadKind,
+  UploadLimits,
+} from "../types/upload";
 
 export interface OperationOption {
   id: Operation;
@@ -160,4 +165,18 @@ export function processingStepLabel(step: string): string {
     waiting_for_text: "Waiting for text extraction",
   };
   return labels[step] ?? step.replace(/_/g, " ");
+}
+
+/** Describe transcription readiness separately from unfinished visual/storage work. */
+export function uploadResultMessage(file: ProcessingFile | null): string {
+  if (!file?.reused)
+    return "Upload accepted. Processing continues in the background.";
+  if (file.file_type !== "video")
+    return "Duplicate file detected. The existing file and its available results were reused.";
+  const speech = file.steps.find((step) => step.operation === "transcribe");
+  if (speech?.status === "completed")
+    return "Duplicate video detected. This file is already transcribed. The existing transcript was reused; no new transcription was started.";
+  if (speech?.status === "queued" || speech?.status === "processing")
+    return "Duplicate video detected. This file is already queued or being transcribed. The existing job was reused; no second transcription was started.";
+  return "Duplicate video detected. The existing recording was reused. Check its processing status for available results.";
 }

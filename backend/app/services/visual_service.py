@@ -1,4 +1,5 @@
 """Independent visual analysis and deterministic timestamp synchronization."""
+
 import logging
 import os
 import shutil
@@ -9,7 +10,12 @@ from app.core.config import get_settings, get_transcription_settings
 from app.processors.video_visuals import VisualExtractionError, extract_visuals
 from app.repositories import visual_repository as repository
 from app.repositories.transcription_repository import (
-    TranscriptNotReadyError, VideoNotFoundError, fail_job, get_job, get_transcript, get_video,
+    TranscriptNotReadyError,
+    VideoNotFoundError,
+    fail_job,
+    get_job,
+    get_transcript,
+    get_video,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,7 +37,9 @@ def synchronize(frames: list[dict], segments: list[dict]) -> list[dict]:
         overlap = 0
         for section in visual_sections:
             frame = section['visual']
-            amount = max(0, min(segment['end_ms'], frame['end_ms']) - max(segment['start_ms'], frame['start_ms']))
+            amount = max(
+                0, min(segment['end_ms'], frame['end_ms']) - max(segment['start_ms'], frame['start_ms'])
+            )
             if amount > overlap:
                 best, overlap = section, amount
         if best is None:
@@ -58,7 +66,9 @@ def get_visual_transcript(file_id: int) -> dict:
     if video is None:
         raise VideoNotFoundError('Recording not found.')
     state = repository.state(file_id) or {
-        'status': 'not_processed', 'current_step': None, 'error_message': None,
+        'status': 'not_processed',
+        'current_step': None,
+        'error_message': None,
     }
     transcript = get_transcript(file_id) if video.status == 'completed' else None
     frames = repository.frames(file_id) if state['status'] == 'completed' else []
@@ -68,7 +78,9 @@ def get_visual_transcript(file_id: int) -> dict:
         # so the UI can distinguish existing disk reuse from suggested cleanup.
         frame['image_reference_id'] = image_references.setdefault(frame['image_path'], frame['id'])
     return {
-        'file_id': file_id, 'filename': video.filename, **state,
+        'file_id': file_id,
+        'filename': video.filename,
+        **state,
         'speech_status': video.status,
         'sections': synchronize(frames, [s.model_dump() for s in transcript.segments]) if transcript else [],
     }
@@ -97,18 +109,32 @@ def process_visual_job(job: dict) -> None:
     try:
         # A killed worker cannot run its finally block. A retry removes only
         # uncommitted image attempts for this file, never original uploads.
-        referenced = {Path(frame['image_path']).resolve().parent for frame in repository.frames(job['file_id'])}
+        referenced = {
+            Path(frame['image_path']).resolve().parent for frame in repository.frames(job['file_id'])
+        }
         if output.parent.is_dir():
             for attempt in output.parent.iterdir():
-                if (len(attempt.name) == 32 and all(c in '0123456789abcdef' for c in attempt.name)
-                        and attempt.is_dir() and not attempt.is_symlink() and attempt.resolve() not in referenced):
+                if (
+                    len(attempt.name) == 32
+                    and all(c in '0123456789abcdef' for c in attempt.name)
+                    and attempt.is_dir()
+                    and not attempt.is_symlink()
+                    and attempt.resolve() not in referenced
+                ):
                     shutil.rmtree(attempt)
         settings = get_transcription_settings()
+        from app.repositories.job_repository import progress
+
         frames = extract_visuals(
-            Path(job['storage_path']), output, job['duration_ms'], ffmpeg=settings.ffmpeg,
+            Path(job['storage_path']),
+            output,
+            job['duration_ms'],
+            ffmpeg=settings.ffmpeg,
             interval=float(os.getenv('VISUAL_SAMPLE_INTERVAL_SECONDS', '5')),
             distance=int(os.getenv('VISUAL_HASH_DISTANCE', '6')),
-            max_frames=int(os.getenv('VISUAL_MAX_FRAMES', '300')), timeout=settings.media_timeout,
+            max_frames=int(os.getenv('VISUAL_MAX_FRAMES', '300')),
+            timeout=settings.media_timeout,
+            on_progress=lambda done, total: progress(job['job_id'], done, total, 'frames'),
         )
         repository.complete(job, frames)
         logger.info('visual_analysis_completed job_id=%s frame_count=%s', job['job_id'], len(frames))
@@ -116,7 +142,9 @@ def process_visual_job(job: dict) -> None:
         if output.is_dir():
             shutil.rmtree(output)
         logger.error('visual_analysis_failed job_id=%s error_type=%s', job['job_id'], type(exc).__name__)
-        message = str(exc) if isinstance(exc, VisualExtractionError) else (
-            'Visual analysis failed. The speech transcript and original recording are preserved.'
+        message = (
+            str(exc)
+            if isinstance(exc, VisualExtractionError)
+            else ('Visual analysis failed. The speech transcript and original recording are preserved.')
         )
         fail_job(job['job_id'], message)

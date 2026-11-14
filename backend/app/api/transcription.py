@@ -125,3 +125,9 @@ def download_visual_transcript(file_id: int, timestamps: bool = False) -> Stream
         ),
         'X-Content-Type-Options': 'nosniff',
     })
+
+
+@router.get('/videos/{file_id}/slide-sources')
+def video_slide_sources(file_id: int) -> dict:
+    from app.services.video_slide_sources import find_sources
+    return database_response(lambda: find_sources(file_id))

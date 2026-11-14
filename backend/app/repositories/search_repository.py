@@ -25,13 +25,14 @@ def get_matching_content(query: str, limit: int) -> list[SearchResult | VideoSea
                        pages.extracted_text AS text
                 FROM document_pages AS pages
                 JOIN files ON files.id = pages.file_id
+                WHERE files.original_removed_at IS NULL
                 UNION ALL
                 SELECT files.id, files.filename, 'video', NULL::integer,
                        segments.id, segments.start_ms, segments.end_ms, segments.text
                 FROM transcript_segments AS segments
                 JOIN files ON files.id = segments.file_id
                 JOIN processing_jobs AS jobs ON jobs.file_id = files.id
-                WHERE files.file_type = 'video'
+                WHERE files.original_removed_at IS NULL AND files.file_type = 'video'
                   AND jobs.job_type = 'video_transcription' AND jobs.status = 'completed'
             ), matches AS MATERIALIZED (
                 SELECT content.*, search_query.terms,

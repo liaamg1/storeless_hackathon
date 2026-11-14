@@ -114,7 +114,7 @@ def test_corrupted_upload_is_cleaned_up(client, database, uploads, monkeypatch):
     assert not list(uploads.glob('*.mp4'))
 
 
-def test_missing_ffprobe(client, uploads, monkeypatch):
+def test_missing_ffprobe(client, database, uploads, monkeypatch):
     monkeypatch.setenv('FFPROBE_BINARY', '/definitely/missing/ffprobe')
     assert upload(client).status_code == 503
     assert not list(uploads.glob('*.mp4'))
@@ -177,7 +177,7 @@ def test_no_speech_is_a_completed_empty_transcript(client, database, fake_video_
 def test_interrupted_job_recovery_keeps_queued_jobs(client, database, fake_video_tools):
     upload(client)
     interrupted = repository.claim_next_job()
-    waiting = upload(client).json()
+    waiting = upload(client, b'a different recording').json()
     assert repository.fail_interrupted_jobs() == 1
     assert repository.get_job(interrupted.job_id).status == 'failed'
     assert 'interrupted' in repository.get_job(interrupted.job_id).error_message
@@ -340,6 +340,8 @@ def test_supervised_worker_waits_for_existing_owner_before_recovery(monkeypatch)
     monkeypatch.setattr(worker, 'claim_next_job', lambda: events.append('claim'))
     monkeypatch.setattr(worker, 'claim_presentation_job', lambda: None)
     monkeypatch.setattr(worker, 'claim_visual_job', lambda: None)
+    from app.repositories import job_repository
+    monkeypatch.setattr(job_repository, 'claim', lambda _: None)
     worker.run_worker(once=True, wait_for_lock=True)
     assert events == ['busy', 'waiting', 'acquired', 'recover', 'claim']
 

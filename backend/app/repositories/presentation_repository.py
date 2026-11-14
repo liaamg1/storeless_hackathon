@@ -1,3 +1,5 @@
+from app.core import worker_context
+
 """Presentation jobs and slide artifacts reuse files, processing_jobs and document_pages."""
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,34 +32,62 @@ def get_source(file_id: int) -> dict | None:
 
 def list_presentations() -> list[PresentationRecord]:
     with get_connection() as connection:
-        rows = connection.execute(_RECORD + ' WHERE ' + _SUPPORTED + ' ORDER BY f.id DESC').fetchall()
+        rows = connection.execute(
+            _RECORD + ' WHERE f.original_removed_at IS NULL AND ' + _SUPPORTED + ' ORDER BY f.id DESC'
+        ).fetchall()
     return [PresentationRecord(**row) for row in rows]
 
 
 def queue_existing(file_id: int) -> PresentationRecord:
     with get_connection() as connection:
+        active = connection.execute(
+            'SELECT id FROM files WHERE id=%s AND original_removed_at IS NULL FOR KEY SHARE', (file_id,)
+        ).fetchone()
+        if not active:
+            raise ValueError('This original was removed; use its retained copy.')
         connection.execute(
             """INSERT INTO processing_jobs (file_id, job_type) VALUES (%s, 'presentation_analysis')
-               ON CONFLICT (file_id, job_type) DO UPDATE SET status='queued', current_step='queued',
+               ON CONFLICT (file_id, job_type) DO UPDATE SET progress_current=NULL,progress_total=NULL,progress_unit=NULL,worker_slot=NULL,worker_id=NULL,status='queued', current_step='queued',
                error_message=NULL, started_at=NULL, completed_at=NULL
-               WHERE processing_jobs.status='failed'""", (file_id,),
+               WHERE processing_jobs.status='failed'""",
+            (file_id,),
         )
     return PresentationRecord(**get_source(file_id))
 
 
-def create_presentation(filename: str, size_bytes: int, sha256: str, path: Path, *, processing_options: list[str] | None = None) -> PresentationRecord:
+def create_presentation(
+    filename: str, size_bytes: int, sha256: str, path: Path, *, processing_options: list[str] | None = None
+) -> PresentationRecord:
     with get_connection() as connection:
         with connection.transaction():
             file = connection.execute(
                 """INSERT INTO files (filename, size_bytes, sha256, storage_path, file_type, processing_options)
                    VALUES (%s,%s,%s,%s,%s,%s) RETURNING id, uploaded_at""",
-                (filename, size_bytes, sha256, str(path), path.suffix[1:], Jsonb(processing_options) if processing_options is not None else None),
+                (
+                    filename,
+                    size_bytes,
+                    sha256,
+                    str(path),
+                    path.suffix[1:],
+                    Jsonb(processing_options) if processing_options is not None else None,
+                ),
             ).fetchone()
             file_id = file['id']
-            job = connection.execute("INSERT INTO processing_jobs (file_id, job_type) VALUES (%s,'presentation_analysis') RETURNING id", (file_id,)).fetchone()
-    return PresentationRecord(file_id=file_id, filename=filename, size_bytes=size_bytes,
-                              uploaded_at=file['uploaded_at'], job_id=job['id'], status='queued',
-                              current_step='queued', error_message=None, slide_count=0)
+            job = connection.execute(
+                "INSERT INTO processing_jobs (file_id, job_type) VALUES (%s,'presentation_analysis') RETURNING id",
+                (file_id,),
+            ).fetchone()
+    return PresentationRecord(
+        file_id=file_id,
+        filename=filename,
+        size_bytes=size_bytes,
+        uploaded_at=file['uploaded_at'],
+        job_id=job['id'],
+        status='queued',
+        current_step='queued',
+        error_message=None,
+        slide_count=0,
+    )
 
 
 def claim_presentation_job() -> PresentationJob | None:
@@ -65,19 +95,27 @@ def claim_presentation_job() -> PresentationJob | None:
         with connection.transaction():
             job = connection.execute(
                 """SELECT j.id AS job_id, j.file_id, f.storage_path, f.filename FROM processing_jobs j
-                   JOIN files f ON f.id=j.file_id WHERE j.job_type='presentation_analysis' AND j.status='queued'
-                   ORDER BY j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1""",
+                   JOIN files f ON f.id=j.file_id WHERE j.job_type='presentation_analysis' AND j.status='queued' AND f.original_removed_at IS NULL
+                   AND NOT EXISTS(SELECT 1 FROM processing_jobs p WHERE p.file_id=f.id AND p.job_type='pdf_text' AND p.status<>'completed')
+                   ORDER BY f.size_bytes,j.created_at,j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1""",
             ).fetchone()
             if job is None:
                 return None
-            connection.execute("UPDATE processing_jobs SET status='processing', current_step='rendering_slides', started_at=NOW(), error_message=NULL WHERE id=%s", (job['job_id'],))
-    return PresentationJob(job['job_id'], job['file_id'], Path(job['storage_path']), Path(job['filename']).suffix.lower()[1:])
+            connection.execute(
+                "UPDATE processing_jobs SET status='processing', current_step='rendering_slides', started_at=NOW(), error_message=NULL,worker_slot=%s,worker_id=%s WHERE id=%s",
+                (worker_context.slot.get(), worker_context.owner.get(), job['job_id']),
+            )
+    return PresentationJob(
+        job['job_id'], job['file_id'], Path(job['storage_path']), Path(job['filename']).suffix.lower()[1:]
+    )
 
 
 def complete_presentation(job: PresentationJob, slides: list[ExtractedSlide]) -> None:
     with get_connection() as connection:
         with connection.transaction():
-            current = connection.execute('SELECT status FROM processing_jobs WHERE id=%s FOR UPDATE', (job.job_id,)).fetchone()
+            current = connection.execute(
+                'SELECT status FROM processing_jobs WHERE id=%s FOR UPDATE', (job.job_id,)
+            ).fetchone()
             if current is None or current['status'] != 'processing':
                 raise ValueError('Presentation job is no longer processing.')
             with connection.cursor() as cursor:
@@ -90,9 +128,23 @@ def complete_presentation(job: PresentationJob, slides: list[ExtractedSlide]) ->
                        ON CONFLICT (file_id,page_number) DO UPDATE SET image_path=EXCLUDED.image_path,
                            thumbnail_path=EXCLUDED.thumbnail_path,content_hash=EXCLUDED.content_hash,
                            perceptual_hash=EXCLUDED.perceptual_hash,slide_processed_at=NOW()""",
-                    [(job.file_id, s.number, s.text, str(s.image_path), str(s.thumbnail_path), s.content_hash, s.perceptual_hash) for s in slides],
+                    [
+                        (
+                            job.file_id,
+                            s.number,
+                            s.text,
+                            str(s.image_path),
+                            str(s.thumbnail_path),
+                            s.content_hash,
+                            s.perceptual_hash,
+                        )
+                        for s in slides
+                    ],
                 )
-            connection.execute("UPDATE processing_jobs SET status='completed',current_step='completed',error_message=NULL,completed_at=NOW() WHERE id=%s", (job.job_id,))
+            connection.execute(
+                "UPDATE processing_jobs SET status='completed',current_step='completed',error_message=NULL,completed_at=NOW() WHERE id=%s",
+                (job.job_id,),
+            )
 
 
 def get_analyzed_slides() -> list[dict]:
@@ -100,11 +152,11 @@ def get_analyzed_slides() -> list[dict]:
     with get_connection() as connection:
         return connection.execute(
             """SELECT p.id,p.file_id,f.filename,p.page_number AS slide_number,
-                      p.extracted_text AS text,p.content_hash,p.perceptual_hash,
+                      p.extracted_text AS text,p.content_hash,p.perceptual_hash,p.image_path,
                       p.slide_processed_at AS processed_at
                FROM document_pages p JOIN files f ON f.id=p.file_id
                JOIN processing_jobs j ON j.file_id=f.id AND j.job_type='presentation_analysis'
-               WHERE j.status='completed' AND p.content_hash IS NOT NULL
+               WHERE j.status='completed' AND p.content_hash IS NOT NULL AND f.original_removed_at IS NULL
                ORDER BY p.file_id,p.page_number""",
         ).fetchall()
 
@@ -116,6 +168,15 @@ def get_slide_path(slide_id: int, thumbnail: bool) -> str | None:
         row = connection.execute(
             f"""SELECT p.{column} AS path FROM document_pages p JOIN processing_jobs j
                 ON j.file_id=p.file_id AND j.job_type='presentation_analysis'
-                WHERE p.id=%s AND j.status='completed'""", (slide_id,),
+                WHERE p.id=%s AND j.status='completed'""",
+            (slide_id,),
         ).fetchone()
     return row['path'] if row else None
+
+
+def artifact_paths(file_id: int) -> list[str]:
+    with get_connection() as connection:
+        rows = connection.execute(
+            'SELECT image_path,thumbnail_path FROM document_pages WHERE file_id=%s', (file_id,)
+        ).fetchall()
+    return [path for row in rows for path in (row['image_path'], row['thumbnail_path']) if path]

@@ -77,7 +77,7 @@ def processing_file(file_id: int) -> dict:
 @router.post('/{file_id}/process', status_code=202)
 def process_existing(file_id: int, selection: ProcessingSelection) -> dict:
     def start() -> dict:
-        service.coordinate(file_id, selection.operations)
-        return service.get_processing(file_id)
+        canonical_id = service.coordinate(file_id, selection.operations)
+        return service.get_processing(canonical_id)
 
     return response(start)

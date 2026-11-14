@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
+import { useFileUpdates } from "../../composables/useFileUpdates";
 import { fetchDocumentSearchResults } from "../../services/search";
 import type { SearchResponse } from "../../types/search";
 import SearchResults from "./SearchResults.vue";
@@ -73,6 +74,9 @@ function clearSearch(): void {
   loading.value = false;
 }
 
+useFileUpdates(() => {
+  if (response.value) return searchDocuments();
+});
 onBeforeUnmount(cancelPendingSearch);
 </script>
 

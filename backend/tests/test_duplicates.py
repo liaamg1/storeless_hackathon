@@ -62,7 +62,7 @@ def test_identical_files_with_different_names(client, duplicate_files, file_coun
     assert group["file_count"] == file_count
     assert group["potential_savings_bytes"] == (file_count - 1) * len(content)
     assert [file["id"] for file in group["files"]] == ids
-    assert set(group["files"][0]) == {"id", "filename", "size_bytes", "uploaded_at"}
+    assert set(group["files"][0]) == {"id", "filename", "size_bytes", "uploaded_at", "completed_operations"}
     assert "storage_path" not in group["files"][0]
 
 

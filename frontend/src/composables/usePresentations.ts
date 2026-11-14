@@ -1,3 +1,4 @@
+import { useFileUpdates } from "./useFileUpdates";
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import {
   listPresentations,
@@ -65,6 +66,10 @@ export function usePresentations() {
       if (current === version && active) loading.value = false;
     }
   }
+  useFileUpdates(async () => {
+    await refreshList();
+    if (selected.value) select(selected.value.file_id);
+  });
   function select(id: number): void {
     version++;
     clearTimeout(timer);

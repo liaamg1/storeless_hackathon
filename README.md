@@ -98,7 +98,7 @@ after every page succeeds; failure removes only that attempt's generated files.
 
 Repeated slides identify **potential reuse opportunities**. No byte savings are
 calculated: cached preview images are analysis artifacts, not a concrete storage
-replacement for the original presentation. Nothing is deleted or deduplicated on disk.
+replacement for the original presentation. Slide similarity alone never authorizes removal; exact duplicate originals can be removed only through the explicit verified cleanup workflow below.
 
 The Docker backend installs LibreOffice Impress. For local Python execution,
 install LibreOffice Impress and ensure `libreoffice` is on PATH (or set
@@ -266,11 +266,12 @@ speech-only fallback, and 320px/390px controls.
 ## Structured cleanup recommendations
 
 Recommendations now appear on **Duplicates**, **Slide Comparison**, and **Visual
-Transcript**. They are suggestions for review: the application does not delete
-files or images.
+Transcript**. Slide and visual suggestions remain review-only. Exact file
+duplicates support explicit verified cleanup, described below.
 
 - **Duplicates:** groups are ordered by potential savings. Each group nominates
-  the earliest known upload to keep (file ID breaks ties), labels the remaining
+  a copy with completed processing results to keep, then the earliest upload
+  (file ID breaks ties), labels the remaining
   copies **Delete duplicate**, and exposes file IDs and match evidence. This uses
   the existing recorded SHA-256 and byte-size comparison; it does not reread the
   originals. Review filenames, links and generated processing results before
@@ -410,7 +411,8 @@ retention of unique content. Video optimization and workspace duplicate savings
 are displayed separately; video copies already suggested for duplicate removal
 are excluded from the optimization total. Slide visual scores are never converted
 into estimated byte savings. Processing details remain available in a collapsed
-section. Recommendations do not delete original files.
+section. Recommendations do not automatically delete original files; confirmed
+exact-duplicate cleanup is the only removal workflow.
 
 The upload workspace now separates **Add files**, **Review recommendations**, and
 **Activity** into focused views. Completed batches switch to recommendations.
@@ -455,3 +457,193 @@ zero-duration overlap check, all frontend test files and the production build.
 Chromium verified real frame previews, the matching passage deep link, HTML
 response length equal to the measured byte count, artifact-download verification and mobile
 storage layout in the isolated QA database. No source files are deleted.
+
+
+## Verified duplicate cleanup and video reuse
+
+Open **Duplicate cleanup** directly in the main sidebar, or use **Review duplicate
+cleanup** at the top of Workspace. Expand a group, choose **Retained copy**, review the other copies,
+check the explicit confirmation, then select **Verify keeper and remove duplicates**.
+The backend rereads actual sizes and SHA-256 hashes for every original, rejects
+stale selections or active processing, and always retains one verified original.
+A keeper must preserve any completed transcription, visuals or slide analysis in
+the group. Similar-looking slides and 95% visual matches remain review-only;
+this workflow accepts only identical file bytes and size.
+
+Only redundant original uploads are removed. Extracted text, transcripts, images,
+file IDs and metadata remain. Retired originals disappear from normal file lists,
+search and duplicate recommendations. Cleanup history records the keeper, removed
+IDs and confirmed original bytes removed. New physical copies create a new case.
+Hard-linked files are credited only when their final physical link is removed;
+this is a measured original-file byte count, not a filesystem free-space promise.
+
+Moves are staged on the same volume with a recovery journal. Failed transactions
+restore staged originals; startup restores uncommitted moves after interruption
+before the worker starts. Committed but incomplete purges remain in **Cleanup
+history** with **Verify keeper and finish cleanup**. Missing unconfirmed staged
+bytes are never credited as savings. Do not manually edit the `.cleanup` directory.
+
+Identical MP4 uploads reuse an existing completed transcript or queued/running
+job, on both upload routes. Completed work is preferred over failed copies;
+missing originals are not reused. A PostgreSQL content lock prevents concurrent
+video uploads from creating duplicate recognition jobs. Uploads still stream to
+disk while computing their actual hash.
+
+For an existing database, apply the repeatable, additive migration before running
+the new backend (never reset the database volume):
+
+```bash
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U my -d restore < database/migrations/009_duplicate_cleanup.sql
+docker compose up --build -d backend frontend
+```
+
+## Slide revisions and possible presentation sources
+
+Slide comparison now includes **What changed?** for the selected slide and chosen
+match. It highlights changed extracted wording and numbers. **Show visual
+differences** overlays cached slide images using a difference blend for layout
+and diagram inspection. Render differences do not establish semantic equivalence
+or indicate which version is newer. Text comparison is capped at 2,000 words per
+slide and clearly labels truncation and slides without selectable text.
+
+In a completed visual transcript, expand **Find this visual in uploaded
+presentations**. Cached images are compared with completed presentation slides,
+using the existing perceptual hash implementation and matching normalization.
+Up to three possible sources show the filename, slide number, visual score and
+preview links. These are suggestions only: wording, numbers, camera overlays and
+animations can affect accuracy. Frame images and stored hashes are never replaced.
+The default candidate threshold is 90%; optionally set
+`VIDEO_SLIDE_MATCH_THRESHOLD` between 0 and 100. Use **Refresh source candidates**
+after analyzing additional presentations.
+
+Validation for these changes: the full backend suite passed **278 tests** against
+an isolated PostgreSQL cluster. After adding the final interruption/locking checks,
+all **17 cleanup tests** passed again. Frontend tests and the production build
+passed. Browser checks covered explicit keeper selection, confirmation gating,
+persistent cleanup history, changed wording/numbers, visual overlays, positive and
+empty source candidates, previews/links, and 320px/390px layouts. Cleanup testing
+used synthetic QA files only; no real application originals were removed.
+
+
+### Clearer cleanup navigation and visual file opening
+
+Duplicate cleanup is always visible in the main navigation and as a Workspace
+shortcut. Keeper selection and explicit confirmation appear above each group's
+file table. Changing the keeper clears the confirmation before removal is enabled.
+PDF and PPTX file result links open rendered slides. The file details drawer has a
+primary **Open slides** action; searchable PDF text remains under **Text version
+(optional)** in processing results. Search text and indexing are preserved.
+
+### Completed actions disappear from active recommendations
+
+Successful cleanup refreshes duplicate cases, Workspace recommendations, file
+lists, slide comparisons, source-slide candidates and open search results.
+Other browser tabs receive the change too; returning to a tab also reconciles its
+view with the backend. Removed files are excluded even when an older comparison
+is still cached. Cleanup history remains available, while unrelated opportunities
+and newly uploaded duplicates can still produce valid suggestions. A failed
+cleanup does not mark the suggestion as completed or hide it.
+
+### Upload and processing feedback
+
+The Files table keeps its current rows, filters and open details visible during
+background status polling. Temporary update failures retain the last loaded data.
+A reused MP4 reports **Duplicate video detected** and distinguishes an already
+completed transcript from an existing queued/running transcription. This notice
+remains visible when upload switches to Recommendations.
+
+Whisper now defaults to `small` (`WHISPER_MODEL=small` in `backend/.env` and the
+example configuration). Audio chunking, CPU settings, queueing and transcript
+reuse are unchanged. Existing completed transcripts are not regenerated.
+
+## Parallel background processing and measured progress
+
+The API supervises independent worker **processes** using the existing PostgreSQL
+`processing_jobs` queue. Defaults in `backend/.env` and `.env.example`:
+
+```dotenv
+TRANSCRIPTION_WORKERS=1
+DOCUMENT_WORKERS=2
+VISUAL_WORKERS=1
+WHISPER_CPU_THREADS=2
+WHISPER_CHUNK_SECONDS=60
+WHISPER_MODEL=small
+```
+
+Worker counts accept 1–8; keep transcription at **1** unless available RAM has
+been checked for multiple model instances. Each document/visual process uses one
+BLAS/OpenMP thread. Faster-whisper retains one inference worker per process and
+the configured CPU-thread count. Only transcription processes load the speech
+model. File uploads stream in 64 KB buffers; audio recognition reads bounded WAV
+windows; video images and presentation pages are decoded one at a time.
+
+Each lane claims the **smallest eligible original file first**, by actual stored
+`size_bytes`, then job creation time and ID for stable ties. Running jobs are not
+preempted by later uploads. PDF slides wait for PDF text extraction; video visuals
+wait for completed transcription. Independent PDFs/slides run while speech is
+being recognized. Failed prerequisites mark queued dependent tasks failed too,
+so they cannot remain stuck indefinitely. Retry through the stored-file workflow.
+
+Central `/uploads` PDF extraction and duplicate checks now queue in the background
+and return HTTP 202 with their actual queued state. PDF page text is inserted
+incrementally in one transaction, preventing partially extracted documents from
+becoming searchable after failure. The legacy `/files/upload` API still returns
+its existing immediate page count; it performs parsing in a bounded process pool
+instead of in FastAPI. Existing routes, stored files and completed results remain
+available, including exact-video transcript reuse.
+
+Worker slots hold PostgreSQL session advisory locks. The same session fences
+artifact/result writes: losing ownership prevents stale commits. Recovery marks
+only the interrupted slot's in-flight tasks failed, preserving other live slots
+and all queued work. The supervisor restarts crashed processes. Originals and
+committed artifacts are retained; uncommitted slide/image attempts are cleaned
+on retry. Shutdown is bounded, and Docker's init process reaps descendants.
+
+`AUTO_START_TRANSCRIPTION_WORKER=false` disables the API-owned pool when managing
+workers separately. Start one process per configured slot, for example:
+
+```bash
+python -m app.worker --kind transcription --slot 0 --wait-for-lock
+python -m app.worker --kind document --slot 0 --wait-for-lock
+python -m app.worker --kind document --slot 1 --wait-for-lock
+python -m app.worker --kind visual --slot 0 --wait-for-lock
+```
+
+Slots coordinate across API instances. The backwards-compatible serial
+`python -m app.worker` command takes an exclusive lock and cannot overlap the
+parallel pool. Configure one pool owner for a multi-API deployment to avoid extra
+standby worker processes. Changing worker counts requires a backend restart.
+
+Existing databases need the additive, repeatable migration before updated code:
+
+```bash
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U my -d restore < database/migrations/010_parallel_jobs.sql
+docker compose up --build -d backend frontend
+```
+
+Progress fields are additive on existing job/upload responses:
+`progress_current`, `progress_total`, `progress_unit`, `progress_percent` and
+`progress_scope`. Job ownership IDs remain internal. Percentages describe the
+**current measured step**, not an invented weighted estimate of the entire
+pipeline: processed audio duration, rendered slide/page count, or decoded sampled
+frames. Unknown totals, model loading, audio extraction, conversion and queued
+stages use an indeterminate bar. Completed files show 100%; failures keep their
+actual last measurement and show the failed state. Browser upload percentages
+come from real XHR transfer events (including multipart framing), not a timer.
+
+Files and processing cards poll backend progress without replacing the file
+table or resetting filters. Processing cards show a small skeleton while work is
+pending. Transcription details expose the same job measurements. No new runtime
+dependency, model family or external queue has been introduced.
+
+Validation: **294 backend tests passed**, including atomic claims, size ordering,
+scoped interruption recovery, lost-session commit fencing, dependency failures,
+progress visibility before PDF commit, and real concurrent worker subprocesses.
+After tightening process-pool shutdown, **23 PDF/lifecycle checks passed without
+warnings**. Frontend tests and build passed. An isolated end-to-end run uploaded a
+220-page PDF, a one-page PDF and a 12-second silent MP4 through real multipart/XHR,
+then ran the configured pool using the cached `small` model. Video and slide work
+overlapped; measured and indeterminate progress, completed 100%, skeletons and
+320px/390px layouts passed. During processing, 55 health checks measured a 2 ms
+median and 61 ms maximum in that QA environment. Synthetic QA files only were
+processed; real application data was not used for these tests.

@@ -11,10 +11,12 @@ export interface VideoUploadResult {
   file_id: number;
   job_id: number;
   filename: string;
-  status: "queued";
+  status: JobStatus;
+  reused?: boolean;
 }
 
 export interface ProcessingJob {
+  progress_percent?: number | null;
   id: number;
   file_id: number;
   status: JobStatus;

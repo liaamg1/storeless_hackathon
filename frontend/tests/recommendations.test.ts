@@ -277,3 +277,44 @@ test("recommendations do not remove a proposed retained copy or retain a propose
   assert.equal(plans[1]?.action, "review_overlap");
   assert.equal(plans[1]?.remove, null);
 });
+
+test("duplicate keeper prefers completed processing over upload age", () => {
+  const files = [
+    {
+      id: 1,
+      filename: "older.mp4",
+      size_bytes: 50,
+      uploaded_at: "2026-11-01",
+      completed_operations: [],
+    },
+    {
+      id: 2,
+      filename: "ready.mp4",
+      size_bytes: 50,
+      uploaded_at: "2026-11-02",
+      completed_operations: ["video_transcription", "video_visuals"],
+    },
+  ];
+  const result = duplicateRecommendation({
+    sha256: "hash",
+    file_size_bytes: 50,
+    file_count: 2,
+    potential_savings_bytes: 50,
+    files,
+  });
+  assert.equal(result?.keep.id, 2);
+  assert.deepEqual(
+    result?.remove.map((file) => file.id),
+    [1],
+  );
+});
+
+test("cached slide matches cannot recommend a removed presentation", () => {
+  const cached = comparison(1, [result(1, 2, 1), result(1, 2, 2)]);
+  assert.equal(
+    presentationRecommendations(cached, [record(1), record(2)]).length,
+    1,
+  );
+  assert.deepEqual(presentationRecommendations(cached, [record(1)]), []);
+  assert.deepEqual(presentationRecommendations(cached, [record(2)]), []);
+});

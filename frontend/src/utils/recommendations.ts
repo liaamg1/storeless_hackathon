@@ -24,7 +24,11 @@ function orderCopies(a: FileReference, b: FileReference): number {
 export function duplicateRecommendation(
   group: DuplicateGroup,
 ): { keep: DuplicateFile; remove: DuplicateFile[] } | null {
-  const ordered = [...group.files].sort(orderCopies);
+  const readiness = (file: DuplicateFile) =>
+    (file.completed_operations ?? []).length;
+  const ordered = [...group.files].sort(
+    (a, b) => readiness(b) - readiness(a) || orderCopies(a, b),
+  );
   return ordered[0] ? { keep: ordered[0], remove: ordered.slice(1) } : null;
 }
 
@@ -57,6 +61,13 @@ export function presentationRecommendations(
   comparison: PresentationComparison,
   records: PresentationRecord[],
 ): PresentationRecommendation[] {
+  // Cached comparisons may outlive a cleanup in another view or browser tab.
+  const active = new Set(
+    records
+      .filter((record) => record.status === "completed")
+      .map((record) => record.file_id),
+  );
+  if (!active.has(comparison.presentation.file_id)) return [];
   const selected: FileReference = {
     id: comparison.presentation.file_id,
     ...comparison.presentation,
@@ -71,7 +82,11 @@ export function presentationRecommendations(
   >();
   for (const result of comparison.slides) {
     for (const match of result.matches) {
-      if (match.slide.file_id === selected.id) continue;
+      if (
+        match.slide.file_id === selected.id ||
+        !active.has(match.slide.file_id)
+      )
+        continue;
       let group = groups.get(match.slide.file_id);
       if (!group) {
         const record = records.find(

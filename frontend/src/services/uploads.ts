@@ -1,4 +1,4 @@
-import { request } from "./api";
+import { API_URL, request } from "./api";
 import type { Operation, ProcessingFile, UploadLimits } from "../types/upload";
 export const getUploadLimits = () => request<UploadLimits>("/uploads/limits");
 export const getProcessingFiles = () => request<ProcessingFile[]>("/uploads");
@@ -7,11 +7,48 @@ export const getFileProcessing = (id: number) =>
 export function uploadAndProcess(
   file: File,
   operations: Operation[],
+  onProgress?: (percent: number | null) => void,
 ): Promise<ProcessingFile> {
   const body = new FormData();
   body.append("file", file);
   body.append("operations", JSON.stringify(operations));
-  return request("/uploads", { method: "POST", body });
+  if (!onProgress) return request("/uploads", { method: "POST", body });
+  return new Promise((resolve, reject) => {
+    const upload = new XMLHttpRequest();
+    upload.open("POST", `${API_URL}/uploads`);
+    upload.upload.onprogress = (event) =>
+      onProgress(
+        event.lengthComputable && event.total > 0
+          ? Math.floor((event.loaded * 100) / event.total)
+          : null,
+      );
+    upload.onerror = () =>
+      reject(
+        new Error("Upload connection failed. Check Files before retrying."),
+      );
+    upload.onabort = () => reject(new Error("Upload cancelled."));
+    upload.onload = () => {
+      let result;
+      try {
+        result = JSON.parse(upload.responseText);
+      } catch {
+        reject(
+          new Error("Invalid upload response. Check Files before retrying."),
+        );
+        return;
+      }
+      if (upload.status >= 200 && upload.status < 300) resolve(result);
+      else
+        reject(
+          new Error(
+            typeof result?.detail === "string"
+              ? result.detail
+              : `Upload failed (${upload.status}).`,
+          ),
+        );
+    };
+    upload.send(body);
+  });
 }
 export function processStoredFile(
   id: number,

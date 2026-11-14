@@ -3,6 +3,7 @@ export interface DuplicateFile {
   filename: string;
   size_bytes: number;
   uploaded_at: string | null;
+  completed_operations?: string[];
 }
 
 export interface DuplicateGroup {

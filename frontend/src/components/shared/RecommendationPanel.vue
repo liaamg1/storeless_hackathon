@@ -11,7 +11,7 @@ defineProps<{ title: string; description: string }>();
     </header>
     <slot />
     <p class="recommendation-footnote">
-      Recommendations only · No files have been deleted.
+      Review the evidence before changing stored files.
     </p>
   </section>
 </template>

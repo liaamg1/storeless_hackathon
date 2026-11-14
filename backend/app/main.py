@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
@@ -19,9 +20,17 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from app.services.duplicate_cleanup import recover_staging
+
+    await asyncio.to_thread(recover_staging)
     # The API owns a separate worker process; model inference never runs on its event loop.
     async with manage_transcription_worker():
-        yield
+        try:
+            yield
+        finally:
+            from app.services.legacy_pdf import shutdown
+
+            await asyncio.to_thread(shutdown)
 
 
 app = FastAPI(title="ReStore", lifespan=lifespan)
@@ -40,5 +49,5 @@ app.include_router(uploads_router)
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+async def health() -> dict[str, str]:
     return {"status": "ok"}

@@ -96,3 +96,30 @@ BEGIN;
 ALTER TABLE files ADD COLUMN IF NOT EXISTS processing_options JSONB
     CHECK (processing_options IS NULL OR jsonb_typeof(processing_options) = 'array');
 COMMIT;
+BEGIN;
+ALTER TABLE files ADD COLUMN IF NOT EXISTS duplicate_of INTEGER REFERENCES files(id) ON DELETE RESTRICT;
+ALTER TABLE files ADD COLUMN IF NOT EXISTS original_removed_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS duplicate_resolutions (
+    id UUID PRIMARY KEY,
+    sha256 TEXT NOT NULL,
+    file_size_bytes BIGINT NOT NULL,
+    keeper_id INTEGER NOT NULL REFERENCES files(id) ON DELETE RESTRICT,
+    removed_ids JSONB NOT NULL,
+    staged_files JSONB NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending_purge','resolved')),
+    removed_bytes BIGINT NOT NULL DEFAULT 0 CHECK(removed_bytes>=0),
+    measurement_complete BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+);
+COMMIT;
+BEGIN;
+ALTER TABLE processing_jobs ADD COLUMN IF NOT EXISTS worker_slot TEXT;
+ALTER TABLE processing_jobs ADD COLUMN IF NOT EXISTS worker_id UUID;
+ALTER TABLE processing_jobs ADD COLUMN IF NOT EXISTS progress_current BIGINT CHECK (progress_current>=0);
+ALTER TABLE processing_jobs ADD COLUMN IF NOT EXISTS progress_total BIGINT CHECK (progress_total>0);
+ALTER TABLE processing_jobs ADD COLUMN IF NOT EXISTS progress_unit TEXT;
+CREATE INDEX IF NOT EXISTS idx_processing_jobs_owner ON processing_jobs(worker_slot) WHERE status='processing';
+CREATE INDEX IF NOT EXISTS idx_files_queue_size ON files(size_bytes,id) WHERE original_removed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_processing_jobs_ready_type ON processing_jobs(job_type,file_id,created_at,id) WHERE status='queued';
+COMMIT;

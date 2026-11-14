@@ -1,4 +1,5 @@
 """Environment-based settings, resolved independently of the working directory."""
+
 import os
 import shutil
 import sys
@@ -61,7 +62,7 @@ def get_transcription_settings() -> TranscriptionSettings:
         ffmpeg=resolve_media_binary("ffmpeg"),
         ffprobe=resolve_media_binary("ffprobe"),
         media_timeout=timeout,
-        model_name=os.getenv("WHISPER_MODEL", "tiny"),
+        model_name=os.getenv("WHISPER_MODEL", "small"),
         device=os.getenv("WHISPER_DEVICE", "cpu"),
         compute_type=os.getenv("WHISPER_COMPUTE_TYPE", "int8"),
         language=None if language in ("", "auto") else language,
@@ -73,4 +74,25 @@ def get_transcription_settings() -> TranscriptionSettings:
 
 def resolve_media_binary(name: str) -> str:
     """Use configured/system tools, then executables installed beside this Python."""
-    return os.getenv(f"{name.upper()}_BINARY") or shutil.which(name) or str(Path(sys.executable).with_name(name))
+    return (
+        os.getenv(f"{name.upper()}_BINARY") or shutil.which(name) or str(Path(sys.executable).with_name(name))
+    )
+
+
+@dataclass(frozen=True)
+class WorkerSettings:
+    transcription: int
+    document: int
+    visual: int
+
+
+def get_worker_settings() -> WorkerSettings:
+    def count(name: str, default: int) -> int:
+        value = int(os.getenv(name, str(default)))
+        if not 1 <= value <= 8:
+            raise ValueError(f"{name} must be between 1 and 8")
+        return value
+
+    return WorkerSettings(
+        count('TRANSCRIPTION_WORKERS', 1), count('DOCUMENT_WORKERS', 2), count('VISUAL_WORKERS', 1)
+    )

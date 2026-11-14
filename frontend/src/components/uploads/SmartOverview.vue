@@ -4,6 +4,8 @@ import { RouterLink } from "vue-router";
 import type { ProcessingFile } from "../../types/upload";
 import type { StorageSavings } from "../../types/storage";
 import type { DuplicateResponse } from "../../types/duplicate";
+import { useFileUpdates } from "../../composables/useFileUpdates";
+import { getFiles } from "../../services/api";
 import { getStorageSavings } from "../../services/storage";
 import { fetchDuplicateGroups } from "../../services/duplicates";
 import {
@@ -24,6 +26,10 @@ function needsAnalysis(file: ProcessingFile) {
 }
 
 const props = defineProps<{ files: ProcessingFile[] }>();
+const activeIds = ref(new Set<number>());
+const activeFiles = computed(() =>
+  props.files.filter((file) => activeIds.value.has(file.file_id)),
+);
 const measurements = ref<Record<number, StorageSavings>>({});
 const matches = ref<Record<number, PresentationRecommendation[]>>({});
 const duplicates = ref<DuplicateResponse | null>(null),
@@ -34,43 +40,56 @@ async function load() {
   const current = ++version;
   loading.value = true;
   error.value = "";
-  const [dupes, decks] = await Promise.allSettled([
+  const [dupes, decks, inventory] = await Promise.allSettled([
     fetchDuplicateGroups(),
     listPresentations(),
+    getFiles(),
   ]);
+  const ids = new Set(
+    inventory.status === "fulfilled"
+      ? inventory.value.map((file) => file.id)
+      : [],
+  );
   const sizes: Record<number, StorageSavings> = {},
     comparisons: Record<number, PresentationRecommendation[]> = {};
   await Promise.all(
-    props.files.map(async (file) => {
-      if (file.status !== "completed" || needsAnalysis(file)) return;
-      try {
-        if (file.file_type === "video")
-          sizes[file.file_id] = await getStorageSavings(file.file_id);
-        else if (
-          file.steps.some(
-            (step) =>
-              step.operation === "slides" && step.status === "completed",
+    props.files
+      .filter((file) => ids.has(file.file_id))
+      .map(async (file) => {
+        if (file.status !== "completed" || needsAnalysis(file)) return;
+        try {
+          if (file.file_type === "video")
+            sizes[file.file_id] = await getStorageSavings(file.file_id);
+          else if (
+            file.steps.some(
+              (step) =>
+                step.operation === "slides" && step.status === "completed",
+            )
           )
-        )
-          comparisons[file.file_id] = presentationRecommendations(
-            await getSlideComparison(file.file_id),
-            decks.status === "fulfilled" ? decks.value : [],
-          );
-      } catch {
-        if (current === version)
-          error.value =
-            "Some measurements or comparisons are unavailable. No savings are assumed for those files.";
-      }
-    }),
+            comparisons[file.file_id] = presentationRecommendations(
+              await getSlideComparison(file.file_id),
+              decks.status === "fulfilled" ? decks.value : [],
+            );
+        } catch {
+          if (current === version)
+            error.value =
+              "Some measurements or comparisons are unavailable. No savings are assumed for those files.";
+        }
+      }),
   );
   if (current !== version) return;
+  activeIds.value = ids;
   duplicates.value = dupes.status === "fulfilled" ? dupes.value : null;
   measurements.value = sizes;
   matches.value = comparisons;
   loading.value = false;
-  if (dupes.status === "rejected")
+  if (inventory.status === "rejected")
+    error.value =
+      "Current files could not be verified. Refresh to see active recommendations.";
+  else if (dupes.status === "rejected")
     error.value = "Duplicate information is unavailable. Retry the overview.";
 }
+useFileUpdates(load);
 watch(
   () =>
     props.files
@@ -109,7 +128,7 @@ const potential = computed(() =>
 );
 const done = computed(
   () =>
-    props.files.filter(
+    activeFiles.value.filter(
       (file) => file.status === "completed" && !needsAnalysis(file),
     ).length,
 );
@@ -199,7 +218,7 @@ function action(file: ProcessingFile) {
   );
 }
 const filtered = computed(() =>
-  props.files
+  activeFiles.value
     .filter((file) => !redundantIds.value.has(file.file_id))
     .filter(
       (file) => filter.value === "all" || action(file).kind === filter.value,

@@ -9,6 +9,8 @@ services:
       - backend
 
   backend:
+    init: true
+    stop_grace_period: 20s
     build: ./backend
     ports:
       - "8000:8000"

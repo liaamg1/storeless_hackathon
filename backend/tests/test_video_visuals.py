@@ -293,3 +293,9 @@ def test_artifact_measurement_matches_download_and_retains_original(client,datab
     assert result['storage_saved_bytes']==original.stat().st_size-len(download.content)
     assert original.is_file()
     assert client.get('/storage-report').status_code==404
+
+
+def test_visual_progress_counts_decoded_samples(monkeypatch,tmp_path):
+    calls=[]
+    decode(monkeypatch,tmp_path,[slide(1),slide(2),slide(3)],on_progress=lambda done,total:calls.append((done,total)))
+    assert calls==[(1,3),(2,3),(3,3)]

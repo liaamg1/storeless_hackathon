@@ -124,7 +124,57 @@ test("Files uses the whole selected pipeline status, including pending visuals a
 });
 
 test("automatic analysis includes every supported check, including video duplicate detection", () => {
- assert.deepEqual([...recommendedOperations("video")].sort(),["duplicates","storage","transcribe","visuals"]);
- assert.deepEqual([...recommendedOperations("pdf")].sort(),["duplicates","pdf_text","slides"]);
- assert.deepEqual([...recommendedOperations("pptx")].sort(),["duplicates","slides"]);
+  assert.deepEqual([...recommendedOperations("video")].sort(), [
+    "duplicates",
+    "storage",
+    "transcribe",
+    "visuals",
+  ]);
+  assert.deepEqual([...recommendedOperations("pdf")].sort(), [
+    "duplicates",
+    "pdf_text",
+    "slides",
+  ]);
+  assert.deepEqual([...recommendedOperations("pptx")].sort(), [
+    "duplicates",
+    "slides",
+  ]);
+});
+
+test("duplicate video notice uses actual speech completion even while visuals are processing", async () => {
+  const { uploadResultMessage } = await import("../src/utils/upload.ts");
+  const file: ProcessingFile = {
+    file_id: 4,
+    filename: "existing.mp4",
+    file_type: "video",
+    size_bytes: 100,
+    operations: ["transcribe", "visuals"],
+    status: "processing",
+    current_step: "extracting_visuals",
+    error_message: null,
+    reused: true,
+    steps: [
+      {
+        operation: "transcribe",
+        status: "completed",
+        current_step: "completed",
+        error_message: null,
+      },
+      {
+        operation: "visuals",
+        status: "processing",
+        current_step: "extracting_visuals",
+        error_message: null,
+      },
+    ],
+  };
+  assert.match(uploadResultMessage(file), /Duplicate video detected/);
+  assert.match(uploadResultMessage(file), /already transcribed/);
+  for (const status of ["queued", "processing"] as const) {
+    file.steps[0]!.status = status;
+    assert.match(uploadResultMessage(file), /existing job was reused/);
+    assert.doesNotMatch(uploadResultMessage(file), /already transcribed\./);
+  }
+  file.reused = false;
+  assert.doesNotMatch(uploadResultMessage(file), /Duplicate/);
 });

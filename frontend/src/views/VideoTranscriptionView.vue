@@ -17,6 +17,7 @@ import TranscriptionProgress from "../components/transcription/TranscriptionProg
 import StorageSavings from "../components/storage/StorageSavings.vue";
 import TranscriptViewer from "../components/transcription/TranscriptViewer.vue";
 import VisualTranscriptViewer from "../components/transcription/VisualTranscriptViewer.vue";
+import { useFileUpdates } from "../composables/useFileUpdates";
 import { useTranscription } from "../composables/useTranscription";
 import { downloadTranscript } from "../services/transcription";
 
@@ -35,6 +36,17 @@ const {
   selectVideo,
   clearSelection,
 } = useTranscription();
+useFileUpdates(async () => {
+  await loadRecordings();
+  if (
+    !recordingsError.value &&
+    selectedVideo.value &&
+    !recordings.value.some(
+      (video) => video.file_id === selectedVideo.value?.file_id,
+    )
+  )
+    clearSelection();
+});
 const selectedSegmentId = computed(() => {
   const value = route.query.segment;
   const id = typeof value === "string" ? Number(value) : 0;

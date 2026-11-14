@@ -15,6 +15,8 @@ from app.repositories import (
 )
 from app.services import transcription_service, upload_service
 from app.services.file_service import CHUNK_SIZE
+from app.repositories import job_repository
+from app.services import document_jobs
 
 
 def upload(client, name, contents, operations):
@@ -29,7 +31,8 @@ def test_pdf_text_only_does_not_start_slide_analysis(client, database, pdf_bytes
     response = upload(client, 'notes.pdf', pdf_bytes(('Searchable unique topic',)), ['pdf_text'])
     assert response.status_code == 202, response.text
     data = response.json()
-    assert data['file_type'] == 'pdf' and data['status'] == 'completed' and not data['reused']
+    assert data['file_type'] == 'pdf' and data['status'] == 'queued' and not data['reused']
+    document_jobs.process_document_job(job_repository.claim('document'))
     assert data['operations'] == ['pdf_text']
     assert slides.claim_presentation_job() is None
     assert client.get('/uploads').json()[0]['file_id'] == data['file_id']
@@ -50,7 +53,8 @@ def test_same_content_is_reused_and_new_operations_added_once(client, database, 
     assert data['reused'] and data['file_id'] == first['file_id'] and data['filename'] == 'first.pdf'
     assert len(list(uploads.glob('*.pdf'))) == 1
     assert data['status'] == 'queued'
-    assert next(step for step in data['steps'] if step['operation'] == 'duplicates')['status'] == 'completed'
+    assert next(step for step in data['steps'] if step['operation'] == 'duplicates')['status'] == 'queued'
+    document_jobs.process_document_job(job_repository.claim('document'))
     job = slides.claim_presentation_job()
     assert job and job.file_id == data['file_id'] and slides.claim_presentation_job() is None
     original = Path(slides.get_source(job.file_id)['storage_path']).read_bytes()
@@ -190,9 +194,14 @@ def test_failed_duplicate_scan_is_not_reported_as_completed(client, database, pd
     def fail():
         raise RuntimeError('private contents')
 
-    monkeypatch.setattr(upload_service, 'get_duplicate_summary', fail)
+    monkeypatch.setattr(document_jobs, 'get_duplicate_summary', fail)
     result = upload(client, 'dup.pdf', pdf_bytes(('text',)), ['pdf_text', 'duplicates'])
     assert result.status_code == 202
+    data = result.json()
+    assert data['status'] == 'queued'
+    document_jobs.process_document_job(job_repository.claim('document'))
+    document_jobs.process_document_job(job_repository.claim('document'))
+    result = client.get(f"/uploads/{data['file_id']}")
     data = result.json()
     assert data['status'] == 'failed' and 'private contents' not in result.text
     assert next(s for s in data['steps'] if s['operation'] == 'pdf_text')['status'] == 'completed'
@@ -210,6 +219,7 @@ def test_pptx_uses_existing_slide_pipeline_and_real_completion(client, database)
     assert data['file_type'] == 'pptx' and data['status'] == 'queued'
     job = slides.claim_presentation_job()
     process_presentation_job(job)
+    document_jobs.process_document_job(job_repository.claim('document'))
     current = client.get(f'/uploads/{job.file_id}').json()
     assert current['status'] == 'completed', current
     assert client.get(f'/presentations/{job.file_id}').json()['slide_count'] == 1

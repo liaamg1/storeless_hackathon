@@ -12,14 +12,14 @@ from app.processors.pdf_processor import ExtractedPage
 def snapshot(file_id: int) -> dict | None:
     with get_connection() as connection:
         file = connection.execute(
-            """SELECT id,filename,size_bytes,storage_path,processing_options,uploaded_at,
+            """SELECT id,filename,size_bytes,storage_path,processing_options,uploaded_at,duplicate_of,original_removed_at,
                       EXISTS(SELECT 1 FROM document_pages p WHERE p.file_id=f.id) AS has_pages
                FROM files f WHERE id=%s""",
             (file_id,),
         ).fetchone()
         if file:
             file['jobs'] = connection.execute(
-                'SELECT job_type,status,current_step,error_message FROM processing_jobs WHERE file_id=%s',
+                'SELECT job_type,status,current_step,error_message,progress_current,progress_total,progress_unit FROM processing_jobs WHERE file_id=%s',
                 (file_id,),
             ).fetchall()
     return file
@@ -30,7 +30,7 @@ def history_ids() -> list[int]:
         return [
             row['id']
             for row in connection.execute(
-                'SELECT id FROM files WHERE processing_options IS NOT NULL ORDER BY id DESC',
+                'SELECT id FROM files WHERE processing_options IS NOT NULL AND original_removed_at IS NULL ORDER BY id DESC',
             ).fetchall()
         ]
 
@@ -38,7 +38,12 @@ def history_ids() -> list[int]:
 def find_existing(digest: str, size: int, suffix: str) -> int | None:
     with get_connection() as connection:
         rows = connection.execute(
-            'SELECT id,filename,storage_path FROM files WHERE sha256=%s AND size_bytes=%s ORDER BY id',
+            '''SELECT f.id,f.filename,f.storage_path FROM files f
+               LEFT JOIN processing_jobs speech ON speech.file_id=f.id AND speech.job_type='video_transcription'
+               LEFT JOIN processing_jobs visual ON visual.file_id=f.id AND visual.job_type='video_visuals'
+               WHERE lower(f.sha256)=%s AND f.size_bytes=%s AND f.original_removed_at IS NULL
+               ORDER BY CASE WHEN speech.status='completed' THEN 0 WHEN speech.status IN ('queued','processing') THEN 1 ELSE 2 END,
+                        CASE WHEN visual.status='completed' THEN 0 ELSE 1 END,f.id''',
             (digest, size),
         ).fetchall()
     for row in rows:
@@ -85,10 +90,15 @@ def merge_options(file_id: int, operations: list[str]) -> None:
 
 def queue(file_id: int, job_type: str) -> bool:
     with get_connection() as connection:
+        active = connection.execute(
+            'SELECT id FROM files WHERE id=%s AND original_removed_at IS NULL FOR KEY SHARE', (file_id,)
+        ).fetchone()
+        if not active:
+            raise ValueError('This original was removed; use its retained copy.')
         return bool(
             connection.execute(
                 """INSERT INTO processing_jobs (file_id,job_type) VALUES (%s,%s)
-               ON CONFLICT(file_id,job_type) DO UPDATE SET status='queued',current_step='queued',
+               ON CONFLICT(file_id,job_type) DO UPDATE SET progress_current=NULL,progress_total=NULL,progress_unit=NULL,worker_slot=NULL,worker_id=NULL,status='queued',current_step='queued',
                error_message=NULL,started_at=NULL,completed_at=NULL WHERE processing_jobs.status='failed'
                RETURNING id""",
                 (file_id, job_type),

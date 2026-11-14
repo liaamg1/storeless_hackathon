@@ -22,6 +22,7 @@ const groups = [
     items: [
       { name: "upload", label: "Workspace", icon: Layers3 },
       { name: "files", label: "All files", icon: Folder },
+      { name: "duplicates", label: "Duplicate cleanup", icon: Copy },
       { name: "search", label: "Search", icon: Search },
     ],
   },
@@ -30,7 +31,6 @@ const groups = [
     items: [
       { name: "overview", label: "Dashboard", icon: LayoutDashboard },
       { name: "slides", label: "Presentation slides", icon: Presentation },
-      { name: "duplicates", label: "Duplicate files", icon: Copy },
       { name: "extract", label: "Document text", icon: FileText },
       { name: "transcription", label: "Recording documents", icon: Video },
       { name: "storage", label: "Storage details", icon: ChartNoAxesColumn },

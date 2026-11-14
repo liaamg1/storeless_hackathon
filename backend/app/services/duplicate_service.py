@@ -7,7 +7,7 @@ def calculate_potential_savings(file_count: int, file_size_bytes: int) -> int:
     """Estimate savings if one copy is kept and all others occupy separate storage.
 
     Integer arithmetic preserves byte counts. A hash match does not establish that
-    removing a file is safe or authorized; this feature never deletes anything.
+    removing a file is safe or authorized; this scan is read-only; cleanup requires a separate confirmed request.
     """
     return max(file_count - 1, 0) * file_size_bytes
 

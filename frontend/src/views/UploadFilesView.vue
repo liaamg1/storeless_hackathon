@@ -9,10 +9,16 @@ import {
   X,
   RefreshCw,
 } from "@lucide/vue";
+import { useFileUpdates } from "../composables/useFileUpdates";
 import { useUnifiedUpload } from "../composables/useUnifiedUpload";
-import { detectUploadKind, operationOptions } from "../utils/upload";
+import {
+  detectUploadKind,
+  operationOptions,
+  uploadResultMessage,
+} from "../utils/upload";
 import { getFileProcessing } from "../services/uploads";
 import { formatBytes } from "../utils/formatBytes";
+import FileProgress from "../components/shared/FileProgress.vue";
 import ProcessingFileCard from "../components/uploads/ProcessingFileCard.vue";
 import SmartOverview from "../components/uploads/SmartOverview.vue";
 
@@ -33,6 +39,7 @@ const {
   canStart,
   start,
 } = useUnifiedUpload();
+useFileUpdates(refresh);
 const tab = ref<"upload" | "review" | "activity">(
   route.query.file ? "upload" : "review",
 );
@@ -121,6 +128,40 @@ onBeforeUnmount(() => {
     </div>
     <button class="button-primary" @click="tab = 'upload'">Add files</button>
   </div>
+  <article
+    v-for="item in items.filter((row) => row.status === 'accepted')"
+    :key="item.key"
+    class="accepted-upload"
+    :class="{ 'duplicate-upload': item.stored?.reused }"
+    role="status"
+  >
+    <strong>{{ item.filename }}</strong>
+    <p>{{ uploadResultMessage(item.stored) }}</p>
+    <RouterLink
+      :to="{
+        name: item.stored?.file_type === 'video' ? 'transcription' : 'files',
+        query: { file: String(item.stored?.file_id) },
+      }"
+    >
+      {{
+        item.stored?.reused && item.stored.file_type === "video"
+          ? "Open existing recording results"
+          : "Open file"
+      }}
+    </RouterLink>
+  </article>
+  <aside class="cleanup-shortcut" aria-label="Duplicate cleanup">
+    <div>
+      <strong>Ready to free up space?</strong>
+      <p>
+        Review exact duplicates, choose one copy to keep, then confirm removal
+        of the others.
+      </p>
+    </div>
+    <RouterLink class="button-primary" :to="{ name: 'duplicates' }"
+      >Review duplicate cleanup →</RouterLink
+    >
+  </aside>
   <nav class="analysis-tabs" aria-label="Analysis views">
     <button :aria-pressed="tab === 'upload'" @click="tab = 'upload'">
       Add files</button
@@ -229,6 +270,18 @@ onBeforeUnmount(() => {
           {{ validation(item) }}
         </p>
         <p v-if="item.error" class="error" role="alert">{{ item.error }}</p>
+        <FileProgress
+          v-if="item.status === 'uploading'"
+          status="uploading"
+          :percent="item.uploadProgress"
+          :step="
+            item.stored
+              ? 'Starting analysis'
+              : item.uploadProgress === 100
+                ? 'Upload transferred · waiting for server'
+                : 'Uploading file'
+          "
+        />
         <p v-if="item.status === 'uploading'" role="status">
           {{
             item.stored
@@ -251,19 +304,6 @@ onBeforeUnmount(() => {
         originals are retained.
       </p>
     </div>
-    <p
-      v-for="item in items.filter((row) => row.status === 'accepted')"
-      :key="item.key"
-      class="accepted-upload"
-      role="status"
-    >
-      {{ item.filename }} —
-      {{ item.stored?.reused ? "Existing file reused" : "Upload accepted" }}.
-      <RouterLink
-        :to="{ name: 'files', query: { file: String(item.stored?.file_id) } }"
-        >Open file</RouterLink
-      >
-    </p>
   </section>
   <SmartOverview v-show="tab === 'review'" :files="history" />
   <section
@@ -293,6 +333,42 @@ onBeforeUnmount(() => {
   </section>
 </template>
 <style scoped>
+.cleanup-shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 20px;
+  margin-bottom: 24px;
+  background: #eef5ff;
+  border: 1px solid #cadff7;
+  border-radius: 12px;
+}
+.cleanup-shortcut > div {
+  flex: 1;
+  min-width: 0;
+}
+.cleanup-shortcut strong {
+  color: #173d70;
+  font-size: 15px;
+}
+.cleanup-shortcut p {
+  font-size: 13px;
+  color: #53677f;
+  line-height: 1.7;
+  margin: 6px 0 0;
+}
+.cleanup-shortcut a {
+  white-space: normal;
+  text-align: center;
+}
+@media (max-width: 600px) {
+  .cleanup-shortcut > div {
+    flex-basis: 100%;
+  }
+}
+
 .analysis-tabs {
   display: flex;
   gap: 8px;
@@ -416,9 +492,24 @@ onBeforeUnmount(() => {
   line-height: 1.7;
 }
 .accepted-upload {
+  padding: 16px 20px;
+  margin-bottom: 18px;
+  border: 1px solid #cce4d7;
+  border-radius: 10px;
+  background: #f1faf5;
   color: #23634b;
   font-size: 13px;
   overflow-wrap: anywhere;
+}
+.accepted-upload p {
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 8px 0;
+}
+.duplicate-upload {
+  background: #eef5ff;
+  border-color: #cadff7;
+  color: #173d70;
 }
 .start-processing {
   margin-top: 6px;

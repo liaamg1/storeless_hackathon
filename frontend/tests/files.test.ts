@@ -82,7 +82,7 @@ test("dates with missing values and equal timestamps have stable ordering", () =
   assert.equal(formatDate(null), "Unknown date");
   assert.equal(formatDate("not a date"), "Unknown date");
 });
-test("long names stay searchable and correct file IDs are used for deep links", () => {
+test("long names stay searchable and PDF files open visually as slides", () => {
   const longFile = {
     ...files[0]!,
     filename: "architecture-".repeat(100) + ".pdf",
@@ -96,7 +96,7 @@ test("long names stay searchable and correct file IDs are used for deep links", 
     query: { file: "2" },
   });
   assert.deepEqual(fileDestination(longFile), {
-    name: "extract",
+    name: "slides",
     query: { file: "1" },
   });
 });

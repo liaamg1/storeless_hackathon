@@ -10,6 +10,8 @@ import {
 import type { WorkspaceFile } from "../../utils/files";
 import { formatDate } from "../../utils/files";
 import { formatBytes } from "../../utils/formatBytes";
+import FileProgress from "../shared/FileProgress.vue";
+import { processingStepLabel } from "../../utils/upload";
 import StatusBadge from "../shared/StatusBadge.vue";
 defineProps<{ files: WorkspaceFile[] }>();
 defineEmits<{ select: [fileId: number] }>();
@@ -69,7 +71,25 @@ defineEmits<{ select: [fileId: number] }>();
             }}</span>
           </td>
           <td class="nowrap">{{ formatBytes(file.size_bytes) }}</td>
-          <td><StatusBadge :status="file.status" /></td>
+          <td>
+            <StatusBadge :status="file.status" /><FileProgress
+              v-if="
+                file.processing ||
+                ['queued', 'processing', 'failed', 'completed'].includes(
+                  file.status,
+                )
+              "
+              compact
+              :status="file.status"
+              :percent="file.processing?.progress_percent"
+              :step="
+                processingStepLabel(
+                  file.processing?.current_step ??
+                    (file.status === 'completed' ? 'completed' : file.status),
+                )
+              "
+            />
+          </td>
           <td class="date-column nowrap">{{ formatDate(file.uploaded_at) }}</td>
           <td>
             <button

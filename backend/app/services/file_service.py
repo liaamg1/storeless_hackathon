@@ -1,11 +1,12 @@
 """Coordinate validation, local storage, PDF extraction, and persistence."""
+
 import hashlib
 import logging
 from typing import BinaryIO
 from uuid import uuid4
 
 from app.core.config import get_settings
-from app.processors.pdf_processor import extract_pdf_pages
+from app.processors.pdf_processor import extract_pdf_pages, validate_pdf
 from app.repositories.file_repository import create_document
 from app.schemas.file import UploadResult
 
@@ -41,7 +42,9 @@ def save_uploaded_file(source: BinaryIO, target: BinaryIO | None, limit: int) ->
     return size_bytes, digest.hexdigest()
 
 
-def upload_pdf(source: BinaryIO, original_filename: str | None, *, processing_options: list[str] | None = None) -> UploadResult:
+def upload_pdf(
+    source: BinaryIO, original_filename: str | None, *, processing_options: list[str] | None = None
+) -> UploadResult:
     """Store a PDF and its pages, removing this upload if any step fails."""
     settings = get_settings()
     upload_id = uuid4().hex
@@ -64,12 +67,26 @@ def upload_pdf(source: BinaryIO, original_filename: str | None, *, processing_op
                 raise UnsupportedFileError("The file contents are not PDF format.")
         logger.info("validation_completed upload_id=%s size_bytes=%s", upload_id, size_bytes)
         logger.info("extraction_started upload_id=%s", upload_id)
-        pages = extract_pdf_pages(destination)
+        background = processing_options is not None
+        if background:
+            validate_pdf(destination)
+            pages = []
+        else:
+            # Preserve the legacy synchronous PDF API while doing parsing outside
+            # the API process. The central /uploads route uses queued page streaming.
+            from app.services.legacy_pdf import extract_in_process
+
+            pages = extract_in_process(extract_pdf_pages, destination)
         logger.info("extraction_completed upload_id=%s page_count=%s", upload_id, len(pages))
         result = create_document(
-            filename, size_bytes, sha256, destination, pages,
+            filename,
+            size_bytes,
+            sha256,
+            destination,
+            pages,
             processing_options=processing_options,
             analyze_slides=processing_options is None or 'slides' in processing_options,
+            background_text=background,
         )
         logger.info("persistence_completed upload_id=%s file_id=%s", upload_id, result.id)
         return result

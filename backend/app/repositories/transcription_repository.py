@@ -1,3 +1,5 @@
+from app.core import worker_context
+
 """PostgreSQL job queue, video metadata, and atomic transcript persistence."""
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,21 +17,87 @@ class ClaimedVideoJob:
     storage_path: Path
 
 
-def create_video_job(filename: str, size_bytes: int, sha256: str,
-                     storage_path: Path, duration_ms: int, *, processing_options: list[str] | None = None) -> VideoUploadResult:
+def create_video_job(
+    filename: str,
+    size_bytes: int,
+    sha256: str,
+    storage_path: Path,
+    duration_ms: int,
+    *,
+    processing_options: list[str] | None = None,
+) -> VideoUploadResult:
     """Commit the original's metadata and queued job together, or neither."""
     with get_connection() as connection:
         with connection.transaction():
+            # Serialize identical recording creation, including concurrent upload routes.
+            from app.repositories.duplicate_repository import content_lock_key
+
+            connection.execute('SELECT pg_advisory_xact_lock(%s)', (content_lock_key(sha256),))
             file_id = connection.execute(
                 """INSERT INTO files (filename, size_bytes, sha256, storage_path, file_type, duration_ms, processing_options)
                    VALUES (%s, %s, %s, %s, 'video', %s, %s) RETURNING id""",
-                (filename, size_bytes, sha256, str(storage_path), duration_ms, Jsonb(processing_options) if processing_options is not None else None),
+                (
+                    filename,
+                    size_bytes,
+                    sha256,
+                    str(storage_path),
+                    duration_ms,
+                    Jsonb(processing_options) if processing_options is not None else None,
+                ),
             ).fetchone()["id"]
             job_id = connection.execute(
                 """INSERT INTO processing_jobs (file_id, job_type)
-                   VALUES (%s, 'video_transcription') RETURNING id""", (file_id,),
+                   VALUES (%s, 'video_transcription') RETURNING id""",
+                (file_id,),
             ).fetchone()["id"]
     return VideoUploadResult(file_id=file_id, job_id=job_id, filename=filename)
+
+
+def reuse_completed_transcript(job: ClaimedVideoJob) -> bool:
+    """Copy an identical completed transcript instead of running speech recognition again."""
+    with get_connection() as connection:
+        with connection.transaction():
+            current = connection.execute(
+                "SELECT status FROM processing_jobs WHERE id=%s FOR UPDATE", (job.job_id,)
+            ).fetchone()
+            if current is None or current['status'] != 'processing':
+                return False
+            source = connection.execute(
+                """SELECT f.id,f.transcript_language
+                   FROM files f JOIN processing_jobs j ON j.file_id=f.id
+                   WHERE f.id<>%s AND lower(f.sha256)=(
+                       SELECT lower(sha256) FROM files WHERE id=%s
+                   ) AND f.size_bytes=(SELECT size_bytes FROM files WHERE id=%s)
+                   AND f.original_removed_at IS NULL AND j.job_type='video_transcription'
+                   AND j.status='completed'
+                   ORDER BY f.id LIMIT 1""",
+                (job.file_id, job.file_id, job.file_id),
+            ).fetchone()
+            if source is None:
+                return False
+            connection.execute(
+                """INSERT INTO transcript_segments(file_id,start_ms,end_ms,text,speaker)
+                   SELECT %s,start_ms,end_ms,text,speaker FROM transcript_segments
+                   WHERE file_id=%s ORDER BY start_ms,end_ms,id""",
+                (job.file_id, source['id']),
+            )
+            connection.execute(
+                "UPDATE files SET transcript_language=%s WHERE id=%s",
+                (source['transcript_language'], job.file_id),
+            )
+            connection.execute(
+                """UPDATE processing_jobs SET status='completed',current_step='completed',
+                   error_message=NULL,completed_at=NOW() WHERE id=%s""",
+                (job.job_id,),
+            )
+            connection.execute(
+                """INSERT INTO processing_jobs(file_id,job_type)
+                   SELECT id,'video_visuals' FROM files WHERE id=%s
+                   AND (processing_options IS NULL OR processing_options ? 'visuals')
+                   ON CONFLICT(file_id,job_type) DO NOTHING""",
+                (job.file_id,),
+            )
+    return True
 
 
 def list_videos() -> list[VideoRecord]:
@@ -38,7 +106,7 @@ def list_videos() -> list[VideoRecord]:
             """SELECT f.id AS file_id, f.filename, f.size_bytes, f.duration_ms, f.uploaded_at,
                       j.id AS job_id, j.status
                FROM files f JOIN processing_jobs j ON j.file_id = f.id
-               WHERE j.job_type = 'video_transcription'
+               WHERE j.job_type = 'video_transcription' AND f.original_removed_at IS NULL
                ORDER BY f.uploaded_at DESC NULLS LAST, f.id DESC"""
         ).fetchall()
     return [VideoRecord(**row) for row in rows]
@@ -50,7 +118,8 @@ def get_video(file_id: int) -> VideoRecord | None:
             """SELECT f.id AS file_id, f.filename, f.size_bytes, f.duration_ms, f.uploaded_at,
                       j.id AS job_id, j.status
                FROM files f JOIN processing_jobs j ON j.file_id = f.id
-               WHERE f.id = %s AND j.job_type = 'video_transcription'""", (file_id,),
+               WHERE f.id = %s AND j.job_type = 'video_transcription'""",
+            (file_id,),
         ).fetchone()
     return VideoRecord(**row) if row else None
 
@@ -59,8 +128,9 @@ def get_job(job_id: int) -> ProcessingJob | None:
     with get_connection() as connection:
         row = connection.execute(
             """SELECT id, file_id, status, current_step, error_message,
-                      created_at, started_at, completed_at FROM processing_jobs
-               WHERE id = %s AND job_type = 'video_transcription'""", (job_id,),
+                      created_at, started_at, completed_at,progress_current,progress_total,progress_unit FROM processing_jobs
+               WHERE id = %s AND job_type = 'video_transcription'""",
+            (job_id,),
         ).fetchone()
     return ProcessingJob(**row) if row else None
 
@@ -69,17 +139,16 @@ def claim_next_job() -> ClaimedVideoJob | None:
     """Claim and commit a queued job before doing slow filesystem/model work."""
     with get_connection() as connection:
         with connection.transaction():
-            job = connection.execute(
-                """SELECT j.id AS job_id, j.file_id, f.storage_path
+            job = connection.execute("""SELECT j.id AS job_id, j.file_id, f.storage_path
                    FROM processing_jobs j JOIN files f ON f.id = j.file_id
-                   WHERE j.job_type = 'video_transcription' AND j.status = 'queued'
-                   ORDER BY j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1"""
-            ).fetchone()
+                   WHERE j.job_type = 'video_transcription' AND j.status = 'queued' AND f.original_removed_at IS NULL
+                   ORDER BY f.size_bytes,j.created_at,j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1""").fetchone()
             if job is None:
                 return None
             connection.execute(
                 """UPDATE processing_jobs SET status = 'processing', current_step = 'validating_video',
-                   started_at = NOW(), error_message = NULL WHERE id = %s""", (job["job_id"],),
+                   started_at = NOW(), error_message = NULL,worker_slot=%s,worker_id=%s WHERE id = %s""",
+                (worker_context.slot.get(), worker_context.owner.get(), job["job_id"]),
             )
     return ClaimedVideoJob(job["job_id"], job["file_id"], Path(job["storage_path"]))
 
@@ -87,17 +156,22 @@ def claim_next_job() -> ClaimedVideoJob | None:
 def update_job_step(job_id: int, step: str) -> None:
     with get_connection() as connection:
         connection.execute(
-            "UPDATE processing_jobs SET current_step = %s WHERE id = %s AND status = 'processing'",
+            "UPDATE processing_jobs SET current_step = %s,progress_current=NULL,progress_total=NULL,progress_unit=NULL WHERE id = %s AND status = 'processing'",
             (step, job_id),
         )
 
 
 def fail_job(job_id: int, message: str) -> None:
+    from app.repositories.job_repository import fail_dependencies
+
     with get_connection() as connection:
-        connection.execute(
-            """UPDATE processing_jobs SET status = 'failed', error_message = %s, completed_at = NOW()
-               WHERE id = %s AND status = 'processing'""", (message, job_id),
-        )
+        row = connection.execute(
+            """UPDATE processing_jobs SET status='failed',error_message=%s,completed_at=NOW()
+               WHERE id=%s AND status='processing' RETURNING file_id,job_type""",
+            (message, job_id),
+        ).fetchone()
+        if row:
+            fail_dependencies(connection, row['file_id'], row['job_type'])
 
 
 def fail_interrupted_jobs() -> int:
@@ -110,7 +184,7 @@ def fail_interrupted_jobs() -> int:
                    WHEN job_type='video_visuals' THEN
                    'Visual analysis was interrupted. The speech transcript is preserved; retry visual analysis.' ELSE
                    'Processing was interrupted by a worker restart. The original recording is preserved.' END
-               WHERE job_type IN ('video_transcription', 'presentation_analysis', 'video_visuals') AND status = 'processing'"""
+               WHERE job_type IN ('video_transcription', 'presentation_analysis', 'video_visuals','pdf_text','duplicate_check') AND status = 'processing'"""
         ).rowcount
 
 
@@ -119,7 +193,8 @@ def complete_transcription(job: ClaimedVideoJob, result: TranscriptionResult) ->
     with get_connection() as connection:
         with connection.transaction():
             current = connection.execute(
-                "SELECT status FROM processing_jobs WHERE id = %s FOR UPDATE", (job.job_id,),
+                "SELECT status FROM processing_jobs WHERE id = %s FOR UPDATE",
+                (job.job_id,),
             ).fetchone()
             if current is None or current["status"] != 'processing':
                 raise ValueError("The transcription job is no longer processing.")
@@ -127,20 +202,26 @@ def complete_transcription(job: ClaimedVideoJob, result: TranscriptionResult) ->
                 cursor.executemany(
                     """INSERT INTO transcript_segments (file_id, start_ms, end_ms, text)
                        VALUES (%s, %s, %s, %s)""",
-                    [(job.file_id, segment.start_ms, segment.end_ms, segment.text) for segment in result.segments],
+                    [
+                        (job.file_id, segment.start_ms, segment.end_ms, segment.text)
+                        for segment in result.segments
+                    ],
                 )
             connection.execute(
-                "UPDATE files SET transcript_language = %s WHERE id = %s", (result.language, job.file_id),
+                "UPDATE files SET transcript_language = %s WHERE id = %s",
+                (result.language, job.file_id),
             )
             connection.execute(
                 """UPDATE processing_jobs SET status = 'completed', current_step = 'completed',
-                   error_message = NULL, completed_at = NOW() WHERE id = %s""", (job.job_id,),
+                   error_message = NULL, completed_at = NOW() WHERE id = %s""",
+                (job.job_id,),
             )
             connection.execute(
                 """INSERT INTO processing_jobs (file_id, job_type)
                    SELECT id, 'video_visuals' FROM files WHERE id=%s
                    AND (processing_options IS NULL OR processing_options ? 'visuals')
-                   ON CONFLICT (file_id, job_type) DO NOTHING""", (job.file_id,),
+                   ON CONFLICT (file_id, job_type) DO NOTHING""",
+                (job.file_id,),
             )
 
 
@@ -151,7 +232,8 @@ def get_transcript(file_id: int) -> VideoTranscript:
             """SELECT f.filename, f.duration_ms, f.transcript_language AS language,
                       j.status, j.current_step, j.error_message
                FROM files f JOIN processing_jobs j ON j.file_id = f.id
-               WHERE f.id = %s AND j.job_type = 'video_transcription'""", (file_id,),
+               WHERE f.id = %s AND j.job_type = 'video_transcription'""",
+            (file_id,),
         ).fetchone()
         if file is None:
             raise VideoNotFoundError("Recording not found.")
@@ -159,10 +241,16 @@ def get_transcript(file_id: int) -> VideoTranscript:
             raise TranscriptNotReadyError(file["status"], file["current_step"], file["error_message"])
         rows = connection.execute(
             """SELECT id, start_ms, end_ms, text FROM transcript_segments
-               WHERE file_id = %s ORDER BY start_ms, end_ms, id""", (file_id,),
+               WHERE file_id = %s ORDER BY start_ms, end_ms, id""",
+            (file_id,),
         ).fetchall()
-    return VideoTranscript(file_id=file_id, filename=file["filename"], duration_ms=file["duration_ms"],
-                           language=file["language"], segments=rows)
+    return VideoTranscript(
+        file_id=file_id,
+        filename=file["filename"],
+        duration_ms=file["duration_ms"],
+        language=file["language"],
+        segments=rows,
+    )
 
 
 class VideoNotFoundError(ValueError):

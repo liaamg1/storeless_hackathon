@@ -1,4 +1,5 @@
 """Validate and render presentations one slide at a time, keeping pixel memory bounded."""
+
 import subprocess
 import zipfile
 from dataclasses import dataclass
@@ -51,11 +52,25 @@ def convert_pptx(path: Path, output_dir: Path, binary: str, timeout: int) -> Pat
     validate_pptx(path)
     profile = (output_dir / 'office-profile').resolve().as_uri()
     try:
-        subprocess.run([
-            binary, f'-env:UserInstallation={profile}', '--headless', '--nologo',
-            '--nodefault', '--norestore', '--nofirststartwizard', '--convert-to',
-            'pdf:impress_pdf_Export', '--outdir', str(output_dir), str(path),
-        ], capture_output=True, timeout=timeout, check=True)
+        subprocess.run(
+            [
+                binary,
+                f'-env:UserInstallation={profile}',
+                '--headless',
+                '--nologo',
+                '--nodefault',
+                '--norestore',
+                '--nofirststartwizard',
+                '--convert-to',
+                'pdf:impress_pdf_Export',
+                '--outdir',
+                str(output_dir),
+                str(path),
+            ],
+            capture_output=True,
+            timeout=timeout,
+            check=True,
+        )
     except FileNotFoundError as exc:
         raise PresentationProcessingError('LibreOffice Impress is required to process PPTX files.') from exc
     except subprocess.TimeoutExpired as exc:
@@ -68,8 +83,16 @@ def convert_pptx(path: Path, output_dir: Path, binary: str, timeout: int) -> Pat
     return converted
 
 
-def extract_slides(path: Path, kind: str, output_dir: Path, *, office_binary: str = 'libreoffice',
-                   timeout: int = 120, max_slides: int = 500) -> Iterator[ExtractedSlide]:
+def extract_slides(
+    path: Path,
+    kind: str,
+    output_dir: Path,
+    *,
+    office_binary: str = 'libreoffice',
+    timeout: int = 120,
+    max_slides: int = 500,
+    on_progress=None,
+) -> Iterator[ExtractedSlide]:
     """Render cached full images and thumbnails; never change the source file."""
     output_dir.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix='restore-presentation-') as temporary:
@@ -80,28 +103,42 @@ def extract_slides(path: Path, kind: str, output_dir: Path, *, office_binary: st
                     raise PresentationProcessingError('Upload an intact, unencrypted presentation.')
                 if not 1 <= document.page_count <= max_slides:
                     raise PresentationProcessingError(f'Presentations must contain 1–{max_slides} slides.')
+                if on_progress:
+                    on_progress(0, document.page_count)
                 for index in range(document.page_count):
                     page = document[index]
                     text = page.get_text('text')
                     # Rasterize the visible page INCLUDING annotations/widgets.
                     # Copying only its PDF content stream would miss annotated numbers.
                     scale = min(CANVAS_WIDTH / page.rect.width, CANVAS_HEIGHT / page.rect.height)
-                    rendered = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
-                                               colorspace=pymupdf.csRGB, alpha=False, annots=True)
+                    rendered = page.get_pixmap(
+                        matrix=pymupdf.Matrix(scale, scale),
+                        colorspace=pymupdf.csRGB,
+                        alpha=False,
+                        annots=True,
+                    )
                     with pymupdf.open() as normalized:
                         target = normalized.new_page(width=CANVAS_WIDTH, height=CANVAS_HEIGHT)
                         width, height = rendered.width, rendered.height
                         left, top = (CANVAS_WIDTH - width) / 2, (CANVAS_HEIGHT - height) / 2
-                        target.insert_image(pymupdf.Rect(left, top, left + width, top + height), pixmap=rendered)
+                        target.insert_image(
+                            pymupdf.Rect(left, top, left + width, top + height), pixmap=rendered
+                        )
                         full = target.get_pixmap(colorspace=pymupdf.csRGB, alpha=False)
-                        gray = target.get_pixmap(matrix=pymupdf.Matrix(32 / CANVAS_WIDTH, 32 / CANVAS_HEIGHT),
-                                                 colorspace=pymupdf.csGRAY, alpha=False)
+                        gray = target.get_pixmap(
+                            matrix=pymupdf.Matrix(32 / CANVAS_WIDTH, 32 / CANVAS_HEIGHT),
+                            colorspace=pymupdf.csGRAY,
+                            alpha=False,
+                        )
                         exact, perceptual = hash_rendered_slide(full.samples, gray.samples, text)
                         image = output_dir / f'slide-{index + 1:04d}.png'
                         thumbnail = output_dir / f'slide-{index + 1:04d}-thumb.png'
                         full.save(image)
-                        target.get_pixmap(matrix=pymupdf.Matrix(.5, .5), colorspace=pymupdf.csRGB,
-                                          alpha=False).save(thumbnail)
+                        target.get_pixmap(
+                            matrix=pymupdf.Matrix(0.5, 0.5), colorspace=pymupdf.csRGB, alpha=False
+                        ).save(thumbnail)
+                    if on_progress:
+                        on_progress(index + 1, document.page_count)
                     yield ExtractedSlide(index + 1, text, image, thumbnail, exact, perceptual)
         except (pymupdf.FileDataError, pymupdf.EmptyFileError, RuntimeError) as exc:
             raise PresentationProcessingError('The presentation is corrupted or unreadable.') from exc

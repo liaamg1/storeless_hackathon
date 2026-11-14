@@ -58,7 +58,7 @@ export const router = createRouter({
     {
       path: "/duplicates",
       name: "duplicates",
-      meta: { title: "Duplicates" },
+      meta: { title: "Duplicate cleanup" },
       component: DuplicatesView,
     },
     {

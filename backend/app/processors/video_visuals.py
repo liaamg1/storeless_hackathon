@@ -1,4 +1,5 @@
 """Incremental sampled-frame extraction; all image buffers have a fixed size."""
+
 import subprocess
 import tempfile
 import time
@@ -57,11 +58,24 @@ def read_frame(stream: BinaryIO) -> bytes:
 
 
 def extract_visuals(
-    path: Path, output: Path, duration_ms: int, *, ffmpeg: str = 'ffmpeg',
-    interval: float = 5, distance: int = 6, max_frames: int = 300, timeout: int = 3600,
+    path: Path,
+    output: Path,
+    duration_ms: int,
+    *,
+    ffmpeg: str = 'ffmpeg',
+    interval: float = 5,
+    distance: int = 6,
+    max_frames: int = 300,
+    timeout: int = 3600,
+    on_progress=None,
 ) -> list[ExtractedFrame]:
-    if (not 1 <= interval <= 60 or not 0 <= distance <= 64 or
-            max_frames < 1 or timeout <= 0 or duration_ms <= 0):
+    if (
+        not 1 <= interval <= 60
+        or not 0 <= distance <= 64
+        or max_frames < 1
+        or timeout <= 0
+        or duration_ms <= 0
+    ):
         raise VisualExtractionError('Invalid visual extraction settings.')
     output.mkdir(parents=True, exist_ok=True)
     filters = (
@@ -70,9 +84,26 @@ def extract_visuals(
         f'pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:white'
     )
     args = [
-        ffmpeg, '-nostdin', '-v', 'error', '-threads', '1', '-protocol_whitelist', 'file,pipe',
-        '-i', str(path), '-an', '-vf', filters,
-        '-threads', '1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'pipe:1',
+        ffmpeg,
+        '-nostdin',
+        '-v',
+        'error',
+        '-threads',
+        '1',
+        '-protocol_whitelist',
+        'file,pipe',
+        '-i',
+        str(path),
+        '-an',
+        '-vf',
+        filters,
+        '-threads',
+        '1',
+        '-pix_fmt',
+        'rgb24',
+        '-f',
+        'rawvideo',
+        'pipe:1',
     ]
     frames: list[ExtractedFrame] = []
     # stderr goes to a temporary file: corrupt media cannot grow a RAM error buffer.
@@ -95,6 +126,8 @@ def extract_visuals(
                     break
                 timestamp = round(sample * interval * 1000)
                 sample += 1
+                if on_progress:
+                    on_progress(sample, max(1, int(np.ceil(duration_ms / (interval * 1000)))))
                 if timestamp >= duration_ms:
                     continue
                 image_hash, meaningful = fingerprint(rgb)
@@ -112,10 +145,14 @@ def extract_visuals(
                     continue  # Uncovered speech is preserved without images.
                 # Revisited visuals have separate intervals but share a compressed
                 # image on disk (e.g. a presenter returns to the first diagram).
-                reused = next((
-                    frame for frame in frames
-                    if perceptual_distance(frame.image_hash, image_hash) <= distance
-                ), None)
+                reused = next(
+                    (
+                        frame
+                        for frame in frames
+                        if perceptual_distance(frame.image_hash, image_hash) <= distance
+                    ),
+                    None,
+                )
                 target = reused.image_path if reused else output / f'frame-{timestamp}.jpg'
                 if reused is None:
                     pixmap = pymupdf.Pixmap(pymupdf.csRGB, WIDTH, HEIGHT, rgb, False)

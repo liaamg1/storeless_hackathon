@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FileProgress from "../shared/FileProgress.vue";
 import StatusBadge from "../shared/StatusBadge.vue";
 import type {
   ProcessingJob,
@@ -43,6 +44,11 @@ const stepLabels: Record<ProcessingStep, string> = {
       </dt>
       <dd role="status">{{ stepLabels[job.current_step] }}</dd>
     </dl>
+    <FileProgress
+      :status="job.status"
+      :percent="job.progress_percent"
+      :step="stepLabels[job.current_step]"
+    />
     <p v-if="job.status === 'failed'" class="error" role="alert">
       {{
         job.error_message ||

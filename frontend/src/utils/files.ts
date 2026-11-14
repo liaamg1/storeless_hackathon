@@ -93,7 +93,7 @@ export function fileDestination(file: Pick<WorkspaceFile, "id" | "type">) {
     name:
       file.type === "video"
         ? "transcription"
-        : file.type === "pptx"
+        : file.type === "pptx" || file.type === "pdf"
           ? "slides"
           : "extract",
     query: { file: String(file.id) },

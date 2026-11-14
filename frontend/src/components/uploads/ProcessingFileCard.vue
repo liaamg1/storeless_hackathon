@@ -5,6 +5,7 @@ import { FileText, Video, Presentation } from "@lucide/vue";
 import type { ProcessingFile } from "../../types/upload";
 import { operationLabel, processingStepLabel } from "../../utils/upload";
 import { formatBytes } from "../../utils/formatBytes";
+import FileProgress from "../shared/FileProgress.vue";
 import StatusBadge from "../shared/StatusBadge.vue";
 const props = defineProps<{ file: ProcessingFile; detail?: boolean }>();
 const completed = (operation: string) =>
@@ -14,11 +15,6 @@ const completed = (operation: string) =>
 const links = computed(() => {
   const query = { file: String(props.file.file_id) };
   const result = [];
-  if (completed("pdf_text"))
-    result.push({
-      label: "Extracted text and pages",
-      to: { name: "extract", query },
-    });
   if (completed("transcribe"))
     result.push({ label: "Transcript", to: { name: "transcription", query } });
   if (completed("visuals"))
@@ -28,14 +24,14 @@ const links = computed(() => {
     });
   if (completed("slides"))
     result.push({
-      label: "Slides and comparisons",
+      label: "Open slides",
       to: { name: "slides", query },
     });
   if (completed("storage"))
     result.push({ label: "Storage savings", to: { name: "storage", query } });
   if (completed("duplicates"))
     result.push({
-      label: "Duplicate information",
+      label: "Review duplicate cleanup",
       to: { name: "duplicates", query },
     });
   return result;
@@ -69,9 +65,15 @@ const links = computed(() => {
       </div>
       <StatusBadge :status="file.status" />
     </header>
-    <p class="processing-current" role="status">
-      {{ processingStepLabel(file.current_step) }}
-    </p>
+    <FileProgress
+      :status="file.status"
+      :percent="file.progress_percent"
+      :step="
+        file.status === 'failed'
+          ? 'Failed · ' + processingStepLabel(file.current_step)
+          : processingStepLabel(file.current_step)
+      "
+    />
     <details>
       <summary>Analysis details · {{ file.steps.length }} checks</summary>
       <ol class="operation-progress">
@@ -115,6 +117,13 @@ const links = computed(() => {
     <p v-else class="muted">
       Results appear here when the backend confirms completion.
     </p>
+    <details v-if="completed('pdf_text')" class="text-version">
+      <summary>Text version (optional)</summary>
+      <RouterLink
+        :to="{ name: 'extract', query: { file: String(file.file_id) } }"
+        >Read searchable document text</RouterLink
+      >
+    </details>
     <RouterLink
       v-if="file.status === 'failed'"
       :to="{ name: 'upload', query: { file: String(file.file_id) } }"
@@ -123,6 +132,15 @@ const links = computed(() => {
   </article>
 </template>
 <style scoped>
+.text-version {
+  margin-top: 16px;
+  font-size: 12px;
+  color: #66768c;
+}
+.text-version a {
+  display: inline-block;
+  margin-top: 10px;
+}
 .processing-file-card {
   padding: 20px;
   border: 1px solid #dce5ef;

@@ -1,4 +1,5 @@
 """Own the local worker for the lifetime of the API, outside request handling."""
+
 import asyncio
 import logging
 import os
@@ -7,7 +8,7 @@ import sys
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
-from app.core.config import BACKEND_DIR
+from app.core.config import BACKEND_DIR, get_worker_settings
 
 logger = logging.getLogger(__name__)
 SHUTDOWN_TIMEOUT_SECONDS = 10
@@ -42,14 +43,26 @@ async def stop_worker(process: asyncio.subprocess.Process) -> None:
         await process.wait()
 
 
-async def supervise_worker(stopping: asyncio.Event) -> None:
+async def supervise_worker(stopping: asyncio.Event, kind: str | None = None, slot: int = 0) -> None:
     """Restart a crashed worker; PostgreSQL keeps queued work and recovery state."""
     while not stopping.is_set():
         try:
-            process = await asyncio.create_subprocess_exec(
-                sys.executable, '-m', 'app.worker', '--wait-for-lock',
-                cwd=str(BACKEND_DIR), start_new_session=True,
-            )
+            arguments = [sys.executable, '-m', 'app.worker', '--wait-for-lock']
+            kwargs = {'cwd': str(BACKEND_DIR), 'start_new_session': True}
+            if kind is not None:
+                arguments += ['--kind', kind, '--slot', str(slot)]
+                env = os.environ.copy()
+                # Keep NumPy/BLAS/FFmpeg work from creating a thread pool per process.
+                threads = env.get('WHISPER_CPU_THREADS', '2') if kind == 'transcription' else '1'
+                for variable in (
+                    'OMP_NUM_THREADS',
+                    'OPENBLAS_NUM_THREADS',
+                    'MKL_NUM_THREADS',
+                    'NUMEXPR_NUM_THREADS',
+                ):
+                    env[variable] = threads
+                kwargs['env'] = env
+            process = await asyncio.create_subprocess_exec(*arguments, **kwargs)
         except OSError as exc:
             logger.error("transcription_worker_start_failed error_type=%s", type(exc).__name__)
             await wait_for_stop(stopping, 2)
@@ -75,9 +88,18 @@ async def manage_transcription_worker() -> AsyncIterator[None]:
         yield
         return
     stopping = asyncio.Event()
-    supervisor = asyncio.create_task(supervise_worker(stopping), name='transcription-worker-supervisor')
+    settings = get_worker_settings()
+    supervisors = [
+        asyncio.create_task(supervise_worker(stopping, kind, slot), name=f'{kind}-{slot}-supervisor')
+        for kind, count in [
+            ('transcription', settings.transcription),
+            ('document', settings.document),
+            ('visual', settings.visual),
+        ]
+        for slot in range(count)
+    ]
     try:
         yield
     finally:
         stopping.set()
-        await supervisor
+        await asyncio.gather(*supervisors)

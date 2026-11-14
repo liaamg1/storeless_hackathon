@@ -119,6 +119,13 @@ function chooseProcessing(): void {
     /></span>
     <h2 id="file-drawer-heading" class="break-word">{{ file.filename }}</h2>
     <StatusBadge :status="file.status" />
+    <div v-if="processing?.steps.length" class="drawer-actions">
+      <button class="button-primary" @click="openResult">
+        <ArrowUpRight :size="16" />{{
+          file.type === "video" ? "Open transcript" : "Open slides"
+        }}
+      </button>
+    </div>
     <dl class="drawer-metadata">
       <dt>File type</dt>
       <dd>
@@ -205,7 +212,7 @@ function chooseProcessing(): void {
               ? "View transcript"
               : file.type === "pptx"
                 ? "View slides"
-                : "View extracted text"
+                : "View slides"
           }}<ArrowUpRight :size="15" /></button
         ><button v-if="file.type === 'video'" @click="openProcessing">
           <Activity :size="16" />View processing status</button

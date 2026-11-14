@@ -13,7 +13,6 @@ import numpy as np
 if TYPE_CHECKING:
     from faster_whisper import WhisperModel
 
-
 class SpeechRecognitionError(RuntimeError):
     pass
 
@@ -51,7 +50,7 @@ def load_model(model_name: str, device: str, compute_type: str, download_root: s
 
 
 def transcribe_audio(
-    audio_path: Path, *, model_name: str = "tiny", device: str = "cpu",
+    audio_path: Path, *, model_name: str = "small", device: str = "cpu",
     compute_type: str = "int8", language: str | None = None, download_root: str,
     chunk_seconds: int = 60, cpu_threads: int = 2,
     on_progress: Callable[[int, int], None] | None = None,
@@ -82,6 +81,8 @@ def transcribe_audio(
             detected_language = language or 'en'
             for core_start in range(0, total_frames, chunk_frames):
                 core_end = min(core_start + chunk_frames, total_frames)
+                start_ms = round(core_start * 1000 / sample_rate)
+                end_ms = round(core_end * 1000 / sample_rate)
                 read_start = max(0, core_start - context_frames)
                 read_end = min(total_frames, core_end + context_frames)
                 source.setpos(read_start)
@@ -94,8 +95,6 @@ def transcribe_audio(
                 raw_segments, info = model.transcribe(audio, language=language, vad_filter=True, beam_size=5)
                 detected_language = info.language
                 offset_ms = round(read_start * 1000 / sample_rate)
-                start_ms = round(core_start * 1000 / sample_rate)
-                end_ms = round(core_end * 1000 / sample_rate)
                 for segment in raw_segments:
                     start = offset_ms + seconds_to_milliseconds(segment.start)
                     end = offset_ms + seconds_to_milliseconds(segment.end)

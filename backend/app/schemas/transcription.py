@@ -4,17 +4,37 @@ from typing import Literal
 from pydantic import BaseModel, computed_field
 
 JobStatus = Literal["queued", "processing", "completed", "failed"]
-ProcessingStep = Literal["queued", "validating_video", "extracting_audio", "transcribing_audio", "saving_transcript", "completed"]
+ProcessingStep = Literal[
+    "queued", "validating_video", "extracting_audio", "transcribing_audio", "saving_transcript", "completed"
+]
 
 
 class VideoUploadResult(BaseModel):
     file_id: int
     job_id: int
     filename: str
-    status: Literal["queued"] = "queued"
+    status: JobStatus = "queued"
+    reused: bool = False
 
 
 class ProcessingJob(BaseModel):
+    progress_current: int | None = None
+    progress_total: int | None = None
+    progress_unit: str | None = None
+
+    @computed_field
+    @property
+    def progress_percent(self) -> int | None:
+        from app.repositories.job_repository import percentage
+
+        return percentage(
+            {
+                'status': self.status,
+                'progress_current': self.progress_current,
+                'progress_total': self.progress_total,
+            }
+        )
+
     id: int
     file_id: int
     status: JobStatus
@@ -66,10 +86,14 @@ class VideoTranscript(BaseModel):
             text = " ".join(segment.text.split())
             if not text:
                 continue
-            if current and previous is not None and (
-                segment.start_ms - previous.end_ms >= 2000
-                or (length >= 600 and previous.text.rstrip().endswith((".", "!", "?", "。", "！", "？")))
-                or length >= 1000
+            if (
+                current
+                and previous is not None
+                and (
+                    segment.start_ms - previous.end_ms >= 2000
+                    or (length >= 600 and previous.text.rstrip().endswith((".", "!", "?", "。", "！", "？")))
+                    or length >= 1000
+                )
             ):
                 paragraphs.append(current)
                 current = []

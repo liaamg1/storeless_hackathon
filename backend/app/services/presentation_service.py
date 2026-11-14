@@ -1,4 +1,5 @@
 """Stream uploads and coordinate the existing background worker and cached artifacts."""
+
 import logging
 import os
 import shutil
@@ -40,7 +41,9 @@ def analyze_presentation(file_id: int) -> PresentationRecord:
     return repository.queue_existing(file_id)
 
 
-def upload_presentation(source: BinaryIO, original_filename: str | None, *, processing_options: list[str] | None = None) -> PresentationRecord:
+def upload_presentation(
+    source: BinaryIO, original_filename: str | None, *, processing_options: list[str] | None = None
+) -> PresentationRecord:
     settings = get_settings()
     filename = (original_filename or '').replace('\\', '/').rsplit('/', 1)[-1]
     suffix = Path(filename).suffix.lower()
@@ -60,7 +63,11 @@ def upload_presentation(source: BinaryIO, original_filename: str | None, *, proc
                 if not pdf.read(1024).lstrip().startswith(b'%PDF-'):
                     raise UnsupportedFileError('The file contents are not PDF format.')
         return repository.create_presentation(
-            filename, size, digest, target, processing_options=processing_options,
+            filename,
+            size,
+            digest,
+            target,
+            processing_options=processing_options,
         )
     except Exception:
         if owns_file:
@@ -72,14 +79,37 @@ def process_presentation_job(job: repository.PresentationJob) -> None:
     settings = get_settings()
     output = settings.upload_dir / 'slides' / str(job.file_id) / uuid4().hex
     try:
+        # A killed process cannot remove its uncommitted render attempt. Clean only
+        # UUID directories for this file, preserving every referenced artifact.
+        referenced = {Path(path).resolve().parent for path in repository.artifact_paths(job.file_id)}
+        if output.parent.is_dir():
+            for attempt in output.parent.iterdir():
+                if (
+                    len(attempt.name) == 32
+                    and all(c in '0123456789abcdef' for c in attempt.name)
+                    and attempt.is_dir()
+                    and not attempt.is_symlink()
+                    and attempt.resolve() not in referenced
+                ):
+                    shutil.rmtree(attempt)
         timeout = int(os.getenv('PRESENTATION_RENDER_TIMEOUT_SECONDS', '120'))
         maximum = int(os.getenv('PRESENTATION_MAX_SLIDES', '500'))
         if timeout <= 0 or maximum <= 0:
             raise PresentationProcessingError('Presentation timeout and slide limit must be positive.')
         logger.info('presentation_rendering_started job_id=%s file_id=%s', job.job_id, job.file_id)
-        slides = list(extract_slides(job.storage_path, job.kind, output,
-                                    office_binary=os.getenv('LIBREOFFICE_BINARY', 'libreoffice'),
-                                    timeout=timeout, max_slides=maximum))
+        from app.repositories.job_repository import progress
+
+        slides = list(
+            extract_slides(
+                job.storage_path,
+                job.kind,
+                output,
+                office_binary=os.getenv('LIBREOFFICE_BINARY', 'libreoffice'),
+                timeout=timeout,
+                max_slides=maximum,
+                on_progress=lambda done, total: progress(job.job_id, done, total, 'slides'),
+            )
+        )
         update_job_step(job.job_id, 'saving_slides')
         repository.complete_presentation(job, slides)
         logger.info('presentation_completed job_id=%s slide_count=%s', job.job_id, len(slides))
@@ -89,7 +119,11 @@ def process_presentation_job(job: repository.PresentationJob) -> None:
         if output.is_dir():
             shutil.rmtree(output)
         logger.error('presentation_processing_failed job_id=%s error_type=%s', job.job_id, type(exc).__name__)
-        message = str(exc) if isinstance(exc, PresentationProcessingError) else 'Presentation analysis failed. The original file is preserved.'
+        message = (
+            str(exc)
+            if isinstance(exc, PresentationProcessingError)
+            else 'Presentation analysis failed. The original file is preserved.'
+        )
         fail_job(job.job_id, message)
 
 

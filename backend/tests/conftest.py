@@ -11,7 +11,8 @@ from psycopg import sql
 from psycopg.rows import dict_row
 
 from app.main import app
-from app.repositories import upload_repository, visual_repository, presentation_repository, duplicate_repository, file_repository, search_repository, transcription_repository
+from app.services import document_jobs
+from app.repositories import job_repository, upload_repository, visual_repository, presentation_repository, duplicate_repository, file_repository, search_repository, transcription_repository
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -92,6 +93,15 @@ def database(monkeypatch):
         for _ in range(2):
             with connect() as connection:
                 connection.execute((ROOT / "database/migrations/008_unified_upload.sql").read_text())
+        for _ in range(2):
+            with connect() as connection:
+                connection.execute((ROOT / "database/migrations/009_duplicate_cleanup.sql").read_text())
+        for _ in range(2):
+            with connect() as connection:
+                connection.execute((ROOT / "database/migrations/010_parallel_jobs.sql").read_text())
+        monkeypatch.setattr(document_jobs,"get_connection",connect)
+        monkeypatch.setattr(job_repository,"get_connection",connect)
+        monkeypatch.setattr(job_repository,"new_connection",connect)
         monkeypatch.setattr(upload_repository, "get_connection", connect)
         monkeypatch.setattr(presentation_repository, "get_connection", connect)
         monkeypatch.setattr(transcription_repository, "get_connection", connect)
